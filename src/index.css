@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #00ff88;
+  --bg: #0a0a0f;
+  --bg-elevated: #111116;
+  --bg-card: #13131a;
+  --border: #1f1f27;
+  --text: #e8e8f0;
+  --text-muted: #888;
+  --text-secondary: #aaa;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+}
+
+.font-display {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.glass {
+  background: rgba(17, 17, 22, 0.85);
+  backdrop-filter: blur(20px);
+}
+
+.premium-card {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.premium-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+.mic-button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mic-button.recording {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  box-shadow: 0 0 0 12px rgba(0, 255, 136, 0.15);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); }
+  50% { box-shadow: 0 0 0 20px rgba(0, 255, 136, 0.1); }
+}
+
+.preview-frame {
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+  border: 1px solid var(--border);
+}
+
+.sandpack-wrapper {
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.log-line {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* Design system tokens per the agent prompt */
+:root {
+  --primary: 142 100% 50%; /* #00ff88 hsl */
+  --shadow-elegant: 0 10px 30px -10px hsl(var(--primary) / 0.3);
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sandpack overrides for dark premium feel */
+.sp-wrapper {
+  --sp-colors-bg-default: #0a0a0f !important;
+  --sp-colors-bg-surface: #111116 !important;
+  --sp-colors-fg-default: #e8e8f0 !important;
+  --sp-colors-fg-muted: #888 !important;
+  --sp-border: #1f1f27 !important;
+}

@@ -1,0 +1,29 @@
+QUICKSTART - IdeaSpeak xAI Prompts (to beat Lovable)
+
+1. For the native IdeaSpeak website build agent (recommended long-term):
+   - Use IdeaSpeak-xAI-Agent-System-Prompt.md as the system prompt for your xAI-powered coding/build agent.
+   - Run IdeaSpeak-Voice-Refiner-Prompt.md on every raw voice transcript first (produces structured brief + optimized input for the agent).
+   - Give the agent strong tools: codebase edit (precise), terminal, logs, search, vision (for screenshots), image gen (xAI for assets), preview control.
+
+2. While still using Lovable bridge:
+   - Run the refiner (Voice-Refiner or the Lovable-Optimized-Refined-Prompt.md) to generate the prompt.
+   - Send the "OPTIMIZED PROMPT FOR LOVABLE" (or the one from Voice Refiner's last section) via the ideaspeak-bridge.js extension.
+   - Result: Lovable produces much better apps because the input is pre-chewed at expert level.
+
+3. Key advantages baked in:
+   - Voice-native understanding + speakable responses
+   - Superior design taste (real product references, sacred design system, motion, polish)
+   - Better architecture & systems thinking (xAI wins here)
+   - Proactive features + production details from v1
+   - xAI inside the generated apps as a killer feature
+   - Flexible modern stack (Next.js when it wins, Supabase/Convex, etc.)
+
+Files:
+- README.md : overview + integration advice
+- IdeaSpeak-xAI-Agent-System-Prompt.md : the main "kick ass" prompt
+- IdeaSpeak-Voice-Refiner-Prompt.md : the secret sauce for voice
+- Lovable-Optimized-Refined-Prompt.md : best prompt to inject into Lovable
+
+Update the agent prompt with your exact tool definitions and any custom action formats your UI uses.
+
+Go make IdeaSpeak the one people switch to because "it just gets spoken ideas and builds something way better."

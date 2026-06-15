@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IdeaSpeak Bridge</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 300px;
+      background: #0a0a0f;
+      color: #e8e8f0;
+      font-family: 'Courier New', monospace;
+      padding: 20px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .logo-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #00ff88;
+      box-shadow: 0 0 8px #00ff88;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .logo-text {
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #00ff88;
+      text-transform: uppercase;
+    }
+
+    .status-card {
+      background: #13131a;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .status-row:last-child { margin-bottom: 0; }
+
+    .label { color: #666; }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: bold;
+    }
+
+    .badge.active {
+      background: rgba(0, 255, 136, 0.15);
+      color: #00ff88;
+      border: 1px solid rgba(0, 255, 136, 0.3);
+    }
+
+    .badge.waiting {
+      background: rgba(255, 165, 0, 0.15);
+      color: #ffa500;
+      border: 1px solid rgba(255, 165, 0, 0.3);
+    }
+
+    .last-prompt {
+      background: #13131a;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 10px;
+      color: #888;
+      line-height: 1.5;
+      min-height: 60px;
+    }
+
+    .last-prompt .title {
+      color: #444;
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    #last-prompt-text {
+      color: #aaa;
+      word-break: break-word;
+    }
+
+    .open-btn {
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid #00ff88;
+      color: #00ff88;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .open-btn:hover {
+      background: rgba(0, 255, 136, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    <div class="logo-text">IdeaSpeak Bridge</div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-row">
+      <span class="label">Extension</span>
+      <span class="badge active">ACTIVE</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Lovable Tab</span>
+      <span id="lovable-status" class="badge waiting">CHECKING...</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Prompts Sent</span>
+      <span id="prompt-count" style="font-size:11px; color:#ccc;">0</span>
+    </div>
+  </div>
+
+  <div class="last-prompt">
+    <div class="title">Last Prompt</div>
+    <div id="last-prompt-text">None yet — speak your idea in IdeaSpeak.</div>
+  </div>
+
+  <button class="open-btn" id="open-lovable">Open Lovable →</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
