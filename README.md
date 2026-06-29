@@ -1,73 +1,69 @@
-# React + TypeScript + Vite
+# IdeaSpeak
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Speak your idea. Ship a production-grade app. Powered by xAI.**
 
-Currently, two official plugins are available:
+IdeaSpeak is the voice-first app builder that turns messy spoken ideas into beautiful, runnable Next.js projects — with taste, transparency, and export paths that actually work.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**Live demo:** [ideaspeak-app.vercel.app](https://ideaspeak-app.vercel.app)
 
-## React Compiler
+## Why IdeaSpeak
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Voice-native** — Talk through your idea; the Voice Refiner elevates it into a structured brief
+- **xAI-powered** — Built on Grok with engineered prompts for taste, proactivity, and production quality
+- **Live preview** — Sandpack preview updates as you refine by voice or text
+- **Ship-ready exports** — ZIP or GitHub with Next.js 15, AGENTS.md, Supabase stubs, and Vercel deploy button
+- **PWA** — Install on your phone for voice building from the home screen
 
-## Expanding the ESLint configuration
+## Quick Start (local)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+git clone https://github.com/kipparchibald/ideaspeak-app.git
+cd ideaspeak-app
+bun install
+bun run dev:full
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open http://localhost:5173 in Chrome (best voice support).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Add your xAI API key in Settings for real Grok generation. Without a key, the high-fidelity simulator still demonstrates the full flow.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## How it works
+
+1. **Discuss & Plan** — Vet your idea with Grok (voice or text)
+2. **Build** — Agent generates a multi-file React/TypeScript project with live preview
+3. **Refine** — Voice or text refinements update the app in real time
+4. **Export** — Download a full Next.js 15 project or push to GitHub
+
+## The moat
+
+Everything follows two engineered prompts in `/prompts/`:
+
+- `IdeaSpeak-Voice-Refiner-Prompt.md`
+- `IdeaSpeak-xAI-Agent-System-Prompt.md`
+
+These drive higher-quality output than generic prompt-to-app tools — voice elevation, anti-slop design rules, proactive features, and production-from-v1 discipline.
+
+## Continue exported projects with Grok
+
+Exported projects include `AGENTS.md` and `IDEA-SPEAK-CONTEXT.md` for faithful continuation:
+
+```bash
+cd your-exported-app
+grok
+# Then: /check-work, or ask Grok to ship via GitHub/Vercel MCP tools
 ```
+
+## Phone / PWA
+
+1. Open the live demo on your phone
+2. Browser menu → "Add to Home Screen"
+3. Enable push alerts in Settings for build-completion notifications
+
+## Docs
+
+- [README-IDEASPEAK.md](./README-IDEASPEAK.md) — Full feature list and architecture
+- [IDEA SPEAK_BETTER_THAN_PEERS_PLAN.md](./IDEA%20SPEAK_BETTER_THAN_PEERS_PLAN.md) — Product strategy and roadmap
+
+## License
+
+Private / all rights reserved (update when ready for open source).

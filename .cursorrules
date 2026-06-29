@@ -1,0 +1,9 @@
+This is the IdeaSpeak builder (React + TS + Vite).
+
+Follow the full agent prompt in prompts/IdeaSpeak-xAI-Agent-System-Prompt.md for any generation or refinement code.
+
+Key:
+- Exports must include AGENTS.md + context files for downstream users.
+- Centralize scaffold in buildNextJsScaffold where possible.
+- Always surface Grok /check-work and Cursor rules in generated projects.
+- High taste + production quality in the builder UI itself.
