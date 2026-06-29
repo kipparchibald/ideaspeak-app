@@ -1,9 +1,6 @@
-export const config = { runtime: 'edge', maxDuration: 60 }
+import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 
-const DISCUSS_SYSTEM = `You are IdeaSpeak in Discussion & Planning Mode powered by xAI Grok.
-Have a natural back-and-forth conversation. Explore the idea, discuss risks, sketch a plan.
-Do NOT generate code yet. Keep responses conversational and speakable.
-When voiceMode is true, keep replies to 1-4 short sentences and end with a question.`
+export const config = { runtime: 'edge', maxDuration: 60 }
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
@@ -27,14 +24,11 @@ export default async function handler(req) {
   }
 
   const { messages, image, personality = 'grok', voiceMode } = await req.json()
-  const personalityNote =
-    personality === 'witty' ? ' Be witty and sarcastic.' :
-    personality === 'mentor' ? ' Be a wise mentor.' :
-    personality === 'coach' ? ' Be an energetic coach.' :
-    personality === 'rebel' ? ' Be an edgy rebel hacker.' : ''
 
+  const isVoice = !!voiceMode
   const fullMessages = [
-    { role: 'system', content: DISCUSS_SYSTEM + personalityNote + (voiceMode ? ' VOICE MODE: 1-4 sentences max.' : '') },
+    { role: 'system', content: buildDiscussSystem(personality, isVoice) },
+    ...(isVoice ? voicePrimingMessages() : []),
     ...messages,
   ]
 
@@ -57,8 +51,10 @@ export default async function handler(req) {
     body: JSON.stringify({
       model: 'grok-3',
       messages: fullMessages,
-      temperature: 0.6,
-      max_tokens: 4000,
+      temperature: isVoice ? 0.92 : 0.78,
+      max_tokens: isVoice ? 120 : 1200,
+      frequency_penalty: 0.45,
+      presence_penalty: 0.2,
     }),
   })
 
@@ -67,8 +63,12 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: data.error?.message || 'xAI error' }), { status: 500 })
   }
 
-  const content = data.choices?.[0]?.message?.content || ''
-  return new Response(JSON.stringify({ content }), {
+  let content = data.choices?.[0]?.message?.content || ''
+  if (voiceMode) {
+    content = humanizeVoiceReply(content)
+  }
+
+  return new Response(JSON.stringify({ content, voiceMode: !!voiceMode }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
   })
 }

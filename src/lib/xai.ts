@@ -177,13 +177,15 @@ export async function generateImage(
 
 function simulateDiscuss(
   messages: XaiMessage[],
-  personality: string,
+  _personality: string,
   voiceMode?: boolean
 ): string {
   const lastUser = messages.filter((m) => m.role === 'user').pop()?.content || ''
-  const prefix = `(simulator — add XAI_API_KEY on Vercel or key in Settings) `
+  const snippet = lastUser.slice(0, 60).trim()
   if (voiceMode) {
-    return `${prefix}I hear you on "${lastUser.slice(0, 70)}". What's the core user problem this solves, and what's the riskiest assumption?`
+    return snippet
+      ? `Okay — "${snippet}" — what's the one thing this has to nail for the user?`
+      : `What's the core idea in one sentence?`
   }
-  return `${prefix}Let's vet "${lastUser.slice(0, 100)}". What's the core problem, who is it for, and what would make v1 genuinely impressive?`
+  return `(offline) On "${snippet || 'your idea'}" — who's the user, what's the #1 job, and what would make v1 feel impressive?`
 }

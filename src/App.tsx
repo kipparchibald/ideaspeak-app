@@ -7,6 +7,7 @@ import { Toaster, toast } from 'sonner'
 import { create } from 'zustand'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
+import { sanitizeForSpeech } from './lib/speech'
 
 // Types
 interface ConversationMessage {
@@ -695,9 +696,10 @@ jobs:
     } catch (e) {
       const lastUser = text.trim();
       // Conversational short fallback when in voice mode
+      const snippet = lastUser.slice(0, 60).trim()
       const fallback = voiceMode 
-        ? `Got it — "${lastUser.slice(0,70)}". What's the most important thing this needs to get right for the user? Any big risk you're worried about?`
-        : `(simulator) Got your point about "${lastUser.slice(0,60)}...". To make a solid plan: What's the #1 job this app needs to do really well? Any must-have features or things to avoid? Let's sketch the happy path and one risk together — what are your initial thoughts?`
+        ? (snippet ? `Hmm — "${snippet}" — what's the one thing it has to get right?` : `What's the core idea?`)
+        : `(offline) On "${snippet || 'your idea'}" — who's the user and what's the #1 job this needs to do?`
       const assistantMsg: ConversationMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -2038,8 +2040,9 @@ export default function IdeaSpeak() {
 
   // Voice-chat aware full speak that drives the listen → think → speak → listen loop
   const speakVoiceReply = (text: string) => {
+    const spoken = sanitizeForSpeech(text, true)
     if (!voiceChatActiveRef.current) {
-      speak(text.length > 280 ? text.slice(0, 280) + '...' : text)
+      speak(spoken)
       return
     }
 
@@ -2063,8 +2066,8 @@ export default function IdeaSpeak() {
       return
     }
 
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.rate = 1.02   // slightly conversational
+    const utterance = new SpeechSynthesisUtterance(spoken)
+    utterance.rate = 1.05   // slightly conversational
     utterance.pitch = 1.0
     utterance.volume = 0.92
 
@@ -2115,8 +2118,7 @@ export default function IdeaSpeak() {
           // Full natural reply, drives auto-resume listening after it finishes
           speakVoiceReply(last.content)
         } else {
-          const toSpeak = last.content.length > 280 ? last.content.slice(0, 280) + '...' : last.content
-          speak(toSpeak)
+          speak(sanitizeForSpeech(last.content, false))
         }
       }
     }
@@ -2619,8 +2621,10 @@ export default function IdeaSpeak() {
 
       <div className="text-center mb-8">
         {isPublicPreview && !grokLive && (
-          <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
-            Simulator mode — add <code className="mx-1">XAI_API_KEY</code> to Vercel env vars, or paste your key in Settings.
+          <div className="mb-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-100 text-left max-w-xl mx-auto">
+            <strong>Why Lovable &quot;just worked&quot;:</strong> they host the API key on their servers — visitors never configure anything.
+            <br />
+            IdeaSpeak is one step away: add <code className="mx-1">XAI_API_KEY</code> to Vercel (owner setup), or paste your key in Settings, or use <strong>Build with Lovable</strong> below (works now, no key).
           </div>
         )}
         {grokLive && (
@@ -2854,15 +2858,36 @@ export default function IdeaSpeak() {
         </div>
 
         {conversation.length >= 4 && (
-          <div className="mt-6 pt-6 border-t border-[#1f1f27]">
+          <div className="mt-6 pt-6 border-t border-[#1f1f27] space-y-3">
             <button 
               onClick={finalizeAndBuild}
               disabled={isBuilding}
               className="w-full py-4 rounded-3xl bg-white text-[#0a0a0f] font-semibold text-lg flex items-center justify-center gap-3 hover:bg-[#f0f0f0] disabled:opacity-50"
             >
-              <Sparkles /> Ready — Finalize Plan &amp; Build the App
+              <Sparkles /> {grokLive ? 'Finalize Plan & Build with Grok' : 'Finalize Plan & Build (simulator)'}
             </button>
-            <p className="text-center text-xs text-[#666] mt-2">We'll hand the full discussion to the xAI builder.</p>
+            <button
+              onClick={async () => {
+                const { buildLovablePrompt, sendToLovable } = await import('./lib/lovable')
+                const prompt = buildLovablePrompt({
+                  conversation,
+                  transcript,
+                  brief: { vision: conversation.map(m => m.content).join(' ').slice(0, 300) },
+                })
+                const result = await sendToLovable(prompt)
+                if (result.success) {
+                  toast.success(result.method === 'extension' ? 'Sent to Lovable via extension!' : 'Prompt copied — Lovable opened. Paste & go!')
+                } else {
+                  toast.error(result.error || 'Could not open Lovable')
+                }
+              }}
+              className="w-full py-3 rounded-3xl border border-[#1f1f27] font-semibold text-sm hover:border-[#00ff88]/50 hover:bg-white/5"
+            >
+              Build with Lovable (hosted API — works like lovable.dev)
+            </button>
+            <p className="text-center text-xs text-[#666]">
+              {grokLive ? 'Native Grok build above, or send optimized prompt to Lovable.' : 'No Grok key yet? Lovable button uses their working hosted API today.'}
+            </p>
           </div>
         )}
       </div>
@@ -3126,7 +3151,18 @@ export default function IdeaSpeak() {
               <p className="text-sm text-[#888] mb-2">
                 Status: <span className={grokLive ? 'text-[#00ff88]' : 'text-amber-300'}>{grokLive ? `Live Grok (${grokSource})` : 'Simulator — no API key detected'}</span>
               </p>
-              <p className="text-sm text-[#888] mb-4">For production demo: set <code>XAI_API_KEY</code> in Vercel project env vars (recommended). Or paste your personal key below.</p>
+              <div className="text-sm text-[#888] mb-4 p-3 rounded-2xl bg-[#111116] border border-[#1f1f27]">
+                <p className="mb-2"><strong className="text-[#e8e8f0]">Lovable-style setup (recommended):</strong></p>
+                <p className="mb-2">Lovable hosts the API key — visitors never see it. Do the same:</p>
+                <ol className="list-decimal list-inside space-y-1 text-xs">
+                  <li>Get key at <a href="https://console.x.ai/" target="_blank" rel="noreferrer" className="text-[#00ff88] underline">console.x.ai</a></li>
+                  <li>Vercel → ideaspeak-app → Settings → Environment Variables</li>
+                  <li>Add <code>XAI_API_KEY</code> = your key (Production)</li>
+                  <li>Redeploy — everyone gets real Grok, no Settings needed</li>
+                </ol>
+                <p className="mt-2 text-xs">Or run locally: <code>./scripts/enable-grok-demo.sh</code></p>
+              </div>
+              <p className="text-sm text-[#888] mb-4">Personal key (works immediately for just you):</p>
               <div className="flex gap-2 mb-4">
                 <input 
                   type="password" 
