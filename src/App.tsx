@@ -44,6 +44,8 @@ interface AppState {
   promptQueue: string[]
   selectedPersonality: string
   selectedVoice: string | null
+  grokLive: boolean
+  grokSource: 'server' | 'client' | 'none'
   setTranscript: (t: string) => void
   toggleRecording: () => void
   buildFromTranscript: () => Promise<void>
@@ -69,6 +71,7 @@ interface AppState {
   notifyBuildComplete: (projectName: string, usedReal?: boolean) => void
   setSelectedPersonality: (p: string) => void
   setSelectedVoice: (v: string | null) => void
+  refreshGrokStatus: () => Promise<void>
 }
 
 // Fun personalities for customization (makes the app playful and personal)
@@ -114,6 +117,8 @@ const useAppStore = create<AppState>((set, get) => ({
   promptQueue: [],
   selectedPersonality: 'grok',
   selectedVoice: null,
+  grokLive: false,
+  grokSource: 'none',
 
   setTranscript: (t) => set({ transcript: t }),
 
@@ -149,19 +154,17 @@ const useAppStore = create<AppState>((set, get) => ({
     let brief: any = {}
     let optimizedPrompt = ''
 
-    if (xaiApiKey) {
-      try {
-        const { runIdeaSpeakAgent, generateWithLLM } = await import('./lib/xai')
-        const refined = await runIdeaSpeakAgent(transcript.trim(), [], xaiApiKey)
-        const result = await generateWithLLM(transcript.trim(), refined.brief, xaiApiKey, selectedPersonality)
-        brief = refined.brief
-        optimizedPrompt = refined.optimizedPrompt
-        files = result.files
-        name = result.name
-        usedReal = true
-      } catch (e) {
-        // fall through to local simulator
-      }
+    try {
+      const { runIdeaSpeakAgent, generateWithLLM } = await import('./lib/xai')
+      const refined = await runIdeaSpeakAgent(transcript.trim(), [], xaiApiKey || undefined)
+      const result = await generateWithLLM(transcript.trim(), refined.brief, xaiApiKey || undefined, selectedPersonality)
+      brief = refined.brief
+      optimizedPrompt = refined.optimizedPrompt
+      files = result.files
+      name = result.name
+      usedReal = true
+    } catch {
+      // fall through to local simulator
     }
 
     if (!usedReal) {
@@ -240,21 +243,19 @@ const useAppStore = create<AppState>((set, get) => ({
     let name = currentProject.name
     let usedRealRefine = false
 
-    const { xaiApiKey: keyForRefine } = get()
-    if (keyForRefine) {
-      try {
-        const { generateWithLLM } = await import('./lib/xai')
-        const result = await generateWithLLM(
-          currentProject.transcript + ' ' + (text.trim() || 'Refine based on vision/screenshot'), 
-          currentProject.brief, 
-          keyForRefine
-        )
-        newFiles = result.files
-        name = result.name || currentProject.name
-        usedRealRefine = true
-      } catch (e) {
-        // fall through to strong local edit
-      }
+    try {
+      const { generateWithLLM } = await import('./lib/xai')
+      const result = await generateWithLLM(
+        currentProject.transcript + ' ' + (text.trim() || 'Refine based on vision/screenshot'),
+        currentProject.brief,
+        get().xaiApiKey || undefined,
+        get().selectedPersonality
+      )
+      newFiles = result.files
+      name = result.name || currentProject.name
+      usedRealRefine = true
+    } catch {
+      // fall through to strong local edit
     }
 
     if (!usedRealRefine) {
@@ -637,8 +638,23 @@ jobs:
   
   updateXaiKey: (key) => {
     localStorage.setItem('ideaspeak_xai_key', key)
-    set({ xaiApiKey: key })
+    set({ xaiApiKey: key, grokLive: !!key || get().grokSource === 'server', grokSource: key ? 'client' : get().grokSource })
     toast.success('xAI API key saved')
+    get().refreshGrokStatus()
+  },
+
+  refreshGrokStatus: async () => {
+    try {
+      const { fetchGrokStatus } = await import('./lib/xai')
+      const status = await fetchGrokStatus()
+      const clientKey = get().xaiApiKey
+      set({
+        grokLive: status.live || !!clientKey,
+        grokSource: status.source === 'server' ? 'server' : clientKey ? 'client' : 'none',
+      })
+    } catch {
+      set({ grokLive: !!get().xaiApiKey, grokSource: get().xaiApiKey ? 'client' : 'none' })
+    }
   },
   updateGithubToken: (token) => {
     localStorage.setItem('ideaspeak_github_token', token)
@@ -705,6 +721,7 @@ jobs:
     try {
       const { generateWithLLM } = await import('./lib/xai')
       const result = await generateWithLLM(planText, null as any, xaiApiKey || undefined, selectedPersonality)
+      // generateWithLLM throws on failure — caught below
 
       const project: CurrentProject = {
         id: Date.now().toString(36),
@@ -1844,9 +1861,13 @@ export default function IdeaSpeak() {
     proactiveSuggestions, fileHistory, promptQueue,
     setPromptQueue,
     loadProject, updateCurrentProjectFiles,
-    selectedPersonality, selectedVoice,
-    setSelectedPersonality, setSelectedVoice
+    selectedPersonality, selectedVoice, grokLive, grokSource,
+    setSelectedPersonality, setSelectedVoice, refreshGrokStatus
   } = useAppStore()
+
+  useEffect(() => {
+    refreshGrokStatus()
+  }, [refreshGrokStatus])
 
   const [refinementText, setRefinementText] = useState('')
   const [modalXaiKey, setModalXaiKey] = useState('')
@@ -2597,9 +2618,14 @@ export default function IdeaSpeak() {
       )}
 
       <div className="text-center mb-8">
-        {isPublicPreview && (
+        {isPublicPreview && !grokLive && (
+          <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+            Simulator mode — add <code className="mx-1">XAI_API_KEY</code> to Vercel env vars, or paste your key in Settings.
+          </div>
+        )}
+        {grokLive && (
           <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-2xl bg-[#00ff88]/10 border border-[#00ff88]/30 text-xs text-[#00ff88]">
-            PUBLIC PREVIEW — Voice conversation &amp; barge-in work fully here. Real Grok needs your xAI key + local server.
+            Live Grok API{grokSource === 'server' ? ' (server key)' : ''} — real discuss, build, and refine.
           </div>
         )}
         <div className="inline-flex items-center gap-2 px-4 py-1 rounded-2xl bg-[#13131a] border border-[#1f1f27] mb-4 text-sm">
@@ -2819,7 +2845,11 @@ export default function IdeaSpeak() {
             ))}
           </AnimatePresence>
           {conversation.length === 0 && (
-            <div className="text-[#666] italic">Speak or type to start a real conversation with Grok. We'll vet the idea together, surface risks, sketch a plan, and only build when it feels solid. (Set your xAI key in Settings for the full powerful experience — otherwise this is a high-quality simulator.)</div>
+            <div className="text-[#666] italic">
+              {grokLive
+                ? 'Speak or type for a real Grok conversation. We vet the idea together, surface risks, sketch a plan, then build when it feels solid.'
+                : 'Speak or type to explore your idea. Add XAI_API_KEY on Vercel (or your key in Settings) for real Grok — otherwise this high-quality simulator still demos the flow.'}
+            </div>
           )}
         </div>
 
@@ -3004,7 +3034,9 @@ export default function IdeaSpeak() {
               </div>
               <span className="font-display text-2xl tracking-tighter font-semibold">IdeaSpeak</span>
             </div>
-            <div className="text-[10px] px-2.5 py-px rounded-full border border-[#1f1f27] text-[#00ff88] font-medium tracking-widest">xAI NATIVE</div>
+            <div className={`text-[10px] px-2.5 py-px rounded-full border font-medium tracking-widest ${grokLive ? 'border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/10' : 'border-[#1f1f27] text-[#888]'}`}>
+              {grokLive ? `LIVE GROK${grokSource === 'server' ? ' · server' : ''}` : 'SIMULATOR'}
+            </div>
 
             <div className="ml-4 flex items-center bg-[#13131a] border border-[#1f1f27] rounded-2xl p-1 text-xs">
               <button 
@@ -3091,7 +3123,10 @@ export default function IdeaSpeak() {
           <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-6" onClick={() => setShowSettings(false)}>
             <div onClick={e=>e.stopPropagation()} className="glass border border-[#1f1f27] rounded-3xl w-full max-w-md p-8">
               <div className="font-semibold mb-4">xAI & GitHub Settings</div>
-              <p className="text-sm text-[#888] mb-4">xAI API key for real Grok (uses backend proxy + full prompts for 100% LLM-driven generation).</p>
+              <p className="text-sm text-[#888] mb-2">
+                Status: <span className={grokLive ? 'text-[#00ff88]' : 'text-amber-300'}>{grokLive ? `Live Grok (${grokSource})` : 'Simulator — no API key detected'}</span>
+              </p>
+              <p className="text-sm text-[#888] mb-4">For production demo: set <code>XAI_API_KEY</code> in Vercel project env vars (recommended). Or paste your personal key below.</p>
               <div className="flex gap-2 mb-4">
                 <input 
                   type="password" 
