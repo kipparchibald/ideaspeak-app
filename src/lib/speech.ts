@@ -22,12 +22,12 @@ export function sanitizeForSpeech(text: string, voiceMode = false): string {
 
   if (voiceMode) {
     const sentences = t.match(/[^.!?]+[.!?]+/g) || [t]
-    if (sentences.length > 2) {
-      t = sentences.slice(0, 2).join(' ').trim()
+    if (sentences.length > 3) {
+      t = sentences.slice(0, 3).join(' ').trim()
     }
     const words = t.split(/\s+/)
-    if (words.length > 50) {
-      t = words.slice(0, 50).join(' ')
+    if (words.length > 60) {
+      t = words.slice(0, 60).join(' ')
       if (!/[.!?]$/.test(t)) t += '?'
     }
   } else if (t.length > 280) {

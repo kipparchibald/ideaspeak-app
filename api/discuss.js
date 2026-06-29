@@ -52,7 +52,7 @@ export default async function handler(req) {
       model: 'grok-3',
       messages: fullMessages,
       temperature: isVoice ? 0.92 : 0.78,
-      max_tokens: isVoice ? 120 : 1200,
+      max_tokens: isVoice ? 165 : 1200,
       frequency_penalty: 0.45,
       presence_penalty: 0.2,
     }),

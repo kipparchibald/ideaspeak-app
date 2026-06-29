@@ -698,8 +698,8 @@ jobs:
       // Conversational short fallback when in voice mode
       const snippet = lastUser.slice(0, 60).trim()
       const fallback = voiceMode 
-        ? (snippet ? `Hmm — "${snippet}" — what's the one thing it has to get right?` : `What's the core idea?`)
-        : `(offline) On "${snippet || 'your idea'}" — who's the user and what's the #1 job this needs to do?`
+        ? (snippet ? `Got it — "${snippet}" — we'll nail one polished slice in v1. What's the core loop users do daily?` : `Talk me through it — we'll land on something buildable that looks way more pro than you'd expect.`)
+        : `(offline) On "${snippet || 'your idea'}" — who's the user, what's the #1 job, and what would make v1 feel impressively real?`
       const assistantMsg: ConversationMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -2318,12 +2318,22 @@ export default function IdeaSpeak() {
     voiceStatusRef.current = 'listening'
     setLiveInterim('')
 
-    // Small delay so UI updates feel crisp then open the mic
-    setTimeout(() => {
-      startListeningForVoiceChat()
-    }, 60)
+    // Seed empty conversations with a practical, confidence-building opener
+    const { conversation: conv } = useAppStore.getState()
+    const isFresh = conv.length === 0
+    if (isFresh) {
+      const opener: ConversationMessage = {
+        id: `voice-opener-${Date.now()}`,
+        role: 'assistant',
+        content: "Alright — walk me through the idea. I'll help you land on something we can actually ship today, and the first build'll look way more pro than you'd expect. What's the one-liner?",
+      }
+      useAppStore.setState({ conversation: [opener] })
+      // Mic opens after opener is spoken (speakVoiceReply onend → startListeningForVoiceChat)
+    } else {
+      setTimeout(() => startListeningForVoiceChat(), 60)
+    }
 
-    toast.success('Conversation started. Just talk back and forth — you can interrupt anytime.', { duration: 2200 })
+    toast.success('Scope it together, then build something surprisingly polished.', { duration: 2400 })
   }
 
   const endVoiceChat = () => {
@@ -2667,8 +2677,8 @@ export default function IdeaSpeak() {
                 <Mic size={46} className="text-[#00ff88]" />
               </button>
               <div className="mt-5 text-[#00ff88] font-semibold tracking-tight">Start talking to Grok</div>
-              <div className="text-sm text-[#888] mt-1 max-w-xs mx-auto">
-                No more tapping the mic every turn. Speak naturally, get a spoken reply, and keep going — just like a real conversation.
+              <div className="text-sm text-[#888] mt-1 max-w-sm mx-auto">
+                Grok will help you scope what&apos;s practical to ship today — then build something that looks and feels like a real product team made it.
               </div>
 
               <button

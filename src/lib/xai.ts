@@ -184,8 +184,8 @@ function simulateDiscuss(
   const snippet = lastUser.slice(0, 60).trim()
   if (voiceMode) {
     return snippet
-      ? `Okay — "${snippet}" — what's the one thing this has to nail for the user?`
-      : `What's the core idea in one sentence?`
+      ? `Okay — "${snippet}" — we can ship a tight v1 that looks legit. What's the one daily action users take?`
+      : `Walk me through it — we'll scope something buildable today that'll surprise you. What's the one-liner?`
   }
   return `(offline) On "${snippet || 'your idea'}" — who's the user, what's the #1 job, and what would make v1 feel impressive?`
 }
