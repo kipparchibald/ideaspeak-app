@@ -1,22 +1,25 @@
-import { buildCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
+export const config = { runtime: 'edge', maxDuration: 60 }
 
-export const config = { runtime: 'nodejs', maxDuration: 120 }
+const MODEL = 'grok-build-0.1'
 
-const BUILD_SYSTEM = `You are IdeaSpeak xAI build agent — production-obsessed, Linear/Stripe/Arc taste.
-Output ONLY raw JSON. No markdown fences, no commentary before or after.
+const BUILD_SYSTEM = `You are IdeaSpeak build agent. Output ONLY raw JSON, no markdown.
+{"name":"App Name","plan":"one sentence","files":{"src/App.tsx":"complete React 19 TSX Tailwind dark UI","src/index.css":"design tokens","src/main.tsx":"entry","README.md":"readme"}}
+Exactly 4 files. Compact, production-quality vertical slice.`
 
-{
-  "name": "Short App Name",
-  "plan": "2 sentences: v1 scope + wow moment",
-  "files": {
-    "src/App.tsx": "complete React 19 TSX, Tailwind, premium dark UI, core loop only",
-    "src/index.css": "semantic design tokens, dark theme",
-    "src/main.tsx": "React entry",
-    "README.md": "run instructions"
-  }
+function getApiKey(req) {
+  const key = req.headers.get('x-ai-key') || req.headers.get('X-AI-Key') || process.env.XAI_API_KEY
+  return typeof key === 'string' ? key.trim() : ''
 }
 
-Exactly 4 files. Focused vertical slice — complete but compact code. Ship in one pass under token budget.`
+function parseJson(content) {
+  if (!content) return null
+  let t = content.trim()
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fence) t = fence[1].trim()
+  const m = t.match(/\{[\s\S]*\}/)
+  if (!m) return null
+  try { return JSON.parse(m[0]) } catch { return null }
+}
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
@@ -28,26 +31,33 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
   }
 
-  const { transcript, brief, personality = 'grok' } = await req.json()
+  const { transcript, brief } = await req.json()
   const user = brief
-    ? `Build a tight v1 vertical slice from brief: ${JSON.stringify(brief)}`
-    : `Build a tight v1 vertical slice from idea: ${transcript}`
+    ? `Build tight v1: ${JSON.stringify(brief)}`
+    : `Build tight v1: ${transcript}`
 
-  const { ok, data } = await buildCompletion(apiKey, {
-    messages: [
-      { role: 'system', content: BUILD_SYSTEM + (personality !== 'grok' ? ` Personality: ${personality}.` : '') },
-      { role: 'user', content: user },
-    ],
-    temperature: 0.55,
-    maxTokens: 4500,
+  const res = await fetch('https://api.x.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: BUILD_SYSTEM },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.5,
+      max_tokens: 3200,
+    }),
   })
 
-  if (!ok) {
-    return new Response(JSON.stringify({ error: xaiError(data) }), { status: 500 })
+  const data = await res.json()
+  if (!res.ok) {
+    const err = data?.error?.message || data?.error || 'xAI error'
+    return new Response(JSON.stringify({ error: err }), { status: 500 })
   }
 
   const content = data.choices?.[0]?.message?.content || ''
-  const parsed = parseJsonFromContent(content)
+  const parsed = parseJson(content)
 
   return new Response(JSON.stringify({ content, parsed }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
