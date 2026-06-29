@@ -43,14 +43,21 @@ Everything follows two engineered prompts in `/prompts/`:
 
 These drive higher-quality output than generic prompt-to-app tools — voice elevation, anti-slop design rules, proactive features, and production-from-v1 discipline.
 
-## Continue exported projects with Grok
+## Grok + Cursor refinement loop
 
-Exported projects include `AGENTS.md` and `IDEA-SPEAK-CONTEXT.md` for faithful continuation:
+See **[GROK-CURSOR-WORKFLOW.md](./GROK-CURSOR-WORKFLOW.md)** for the full speak → build → export → refine → ship loop.
 
 ```bash
 cd your-exported-app
 grok
-# Then: /check-work, or ask Grok to ship via GitHub/Vercel MCP tools
+# /check-work → /implement → ship via GitHub/Vercel MCP
+```
+
+## Smoke test
+
+```bash
+bun run smoke          # production API + UI
+bun run smoke:full     # includes /api/build (~2 min)
 ```
 
 ## Phone / PWA

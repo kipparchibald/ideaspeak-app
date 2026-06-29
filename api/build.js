@@ -1,29 +1,28 @@
+import { buildCompletion, getApiKey, xaiError } from './xai.js'
+
 export const config = { runtime: 'edge', maxDuration: 60 }
 
-const BUILD_SYSTEM = `You are IdeaSpeak xAI build agent. Output ONLY valid JSON:
+const BUILD_SYSTEM = `You are IdeaSpeak xAI build agent — production-obsessed, Linear/Stripe/Arc taste.
+Output ONLY valid JSON (no markdown fences):
 {
   "name": "Short App Name",
-  "plan": "2-3 sentence plan",
+  "plan": "2-3 sentence plan with wow moment and v1 scope",
   "files": {
     "src/App.tsx": "complete React 19 TSX with Tailwind classes",
-    "src/index.css": "CSS with design tokens",
+    "src/index.css": "CSS with semantic design tokens, dark premium theme",
     "src/main.tsx": "React entry",
-    "src/components/Button.tsx": "button component",
-    "README.md": "readme"
+    "src/components/Button.tsx": "reusable button component",
+    "README.md": "readme with run instructions"
   }
 }
-Premium dark UI (Linear/Arc taste). At least 5 files. Each file value is complete source code string.`
+At least 5 files. Each file value is complete source code string. Beautiful, accessible, production-ready.`
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*' } })
   }
 
-  const apiKey =
-    req.headers.get('x-ai-key') ||
-    req.headers.get('X-AI-Key') ||
-    process.env.XAI_API_KEY
-
+  const apiKey = getApiKey(req)
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
   }
@@ -33,26 +32,17 @@ export default async function handler(req) {
     ? `Build from brief: ${JSON.stringify(brief)}`
     : `Build from idea: ${transcript}`
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'grok-3',
-      messages: [
-        { role: 'system', content: BUILD_SYSTEM },
-        { role: 'user', content: user },
-      ],
-      temperature: 0.6,
-      max_tokens: 8000,
-    }),
+  const { ok, data } = await buildCompletion(apiKey, {
+    messages: [
+      { role: 'system', content: BUILD_SYSTEM + (personality !== 'grok' ? ` Personality: ${personality}.` : '') },
+      { role: 'user', content: user },
+    ],
+    temperature: 0.6,
+    maxTokens: 8000,
   })
 
-  const data = await res.json()
-  if (!res.ok) {
-    return new Response(JSON.stringify({ error: data.error?.message || 'xAI error' }), { status: 500 })
+  if (!ok) {
+    return new Response(JSON.stringify({ error: xaiError(data) }), { status: 500 })
   }
 
   const content = data.choices?.[0]?.message?.content || ''

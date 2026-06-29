@@ -1,4 +1,5 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
+import { chatCompletion, getApiKey, xaiError } from './xai.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -14,11 +15,7 @@ export default async function handler(req) {
     })
   }
 
-  const apiKey =
-    req.headers.get('x-ai-key') ||
-    req.headers.get('X-AI-Key') ||
-    process.env.XAI_API_KEY
-
+  const apiKey = getApiKey(req)
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
   }
@@ -42,25 +39,15 @@ export default async function handler(req) {
     }
   }
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'grok-3',
-      messages: fullMessages,
-      temperature: isVoice ? 0.92 : 0.78,
-      max_tokens: isVoice ? 165 : 1200,
-      frequency_penalty: 0.45,
-      presence_penalty: 0.2,
-    }),
+  const { ok, data } = await chatCompletion(apiKey, {
+    messages: fullMessages,
+    temperature: isVoice ? 0.92 : 0.78,
+    maxTokens: isVoice ? 165 : 1200,
+    reasoningEffort: isVoice ? 'none' : 'low',
   })
 
-  const data = await res.json()
-  if (!res.ok) {
-    return new Response(JSON.stringify({ error: data.error?.message || 'xAI error' }), { status: 500 })
+  if (!ok) {
+    return new Response(JSON.stringify({ error: xaiError(data) }), { status: 500 })
   }
 
   let content = data.choices?.[0]?.message?.content || ''

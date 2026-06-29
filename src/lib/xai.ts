@@ -24,6 +24,7 @@ export type GrokStatus = {
   live: boolean
   source: 'server' | 'client' | 'none'
   message?: string
+  model?: string
 }
 
 let cachedStatus: GrokStatus | null = null
@@ -38,6 +39,7 @@ export async function fetchGrokStatus(): Promise<GrokStatus> {
       live: data.live || !!clientKey,
       source: data.live ? 'server' : clientKey ? 'client' : 'none',
       message: data.message,
+      model: data.model,
     }
     return cachedStatus
   } catch {

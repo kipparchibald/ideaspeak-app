@@ -16,7 +16,7 @@ async function loadPrompt(file: string): Promise<string> {
   }
 }
 
-async function callXaiProxy(messages: any[], apiKey: string, model = 'grok-3') {
+async function callXaiProxy(messages: any[], apiKey: string, model = 'grok-4.3', reasoningEffort?: string) {
   const res = await fetch(XAI_API, {
     method: 'POST',
     headers: {
@@ -28,6 +28,7 @@ async function callXaiProxy(messages: any[], apiKey: string, model = 'grok-3') {
       messages,
       temperature: 0.6,
       max_tokens: 8000,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     }),
   });
   const data = await res.json();
@@ -140,7 +141,7 @@ Use modern React 19 + TS + Tailwind. Make UIs stunning per the manifesto (Linear
         const content = await callXaiProxy([
           { role: 'system', content: system },
           { role: 'user', content: user }
-        ], apiKey);
+        ], apiKey, 'grok-build-0.1');
 
         let parsed;
         try {
@@ -221,7 +222,7 @@ When the user is ready, summarize the agreed plan clearly so it can be handed of
           }
         }
 
-        const content = await callXaiProxy(fullMessages, apiKey);
+        const content = await callXaiProxy(fullMessages, apiKey, 'grok-4.3', voiceMode ? 'none' : 'low');
         return Response.json({ content }, { headers: cors });
       } catch (e: any) {
         return Response.json({ error: e.message }, { status: 500, headers: cors });
