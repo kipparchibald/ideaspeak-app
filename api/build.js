@@ -1,6 +1,6 @@
 import { buildCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
 
-export const config = { runtime: 'edge', maxDuration: 60 }
+export const config = { runtime: 'nodejs', maxDuration: 120 }
 
 const BUILD_SYSTEM = `You are IdeaSpeak xAI build agent — production-obsessed, Linear/Stripe/Arc taste.
 Output ONLY raw JSON. No markdown fences, no commentary before or after.

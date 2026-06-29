@@ -1,5 +1,9 @@
 {
-
+  "functions": {
+    "api/build.js": {
+      "maxDuration": 120
+    }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

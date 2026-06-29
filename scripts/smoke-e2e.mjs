@@ -89,12 +89,15 @@ if (RUN_BUILD) {
         transcript: 'Minimal todo app with premium dark UI and voice add',
         brief: { vision: 'Voice-first todo', keyFeatures: ['voice add', 'dark UI'] },
       }),
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(110000),
     })
+    if (res.status === 504) throw new Error('Edge timeout — build uses Node 120s; redeploy if this persists')
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-    if (!data.parsed?.files?.['src/App.tsx']) throw new Error('no parsed files')
-    return `${Object.keys(data.parsed.files).length} files`
+    if (!data.parsed?.files?.['src/App.tsx']) {
+      throw new Error(data.parsed ? 'missing App.tsx' : 'failed to parse build JSON')
+    }
+    return `${Object.keys(data.parsed.files).length} files — ${data.parsed.name}`
   })
 } else {
   console.log('⊘ POST /api/build skipped (pass --build to include)')
