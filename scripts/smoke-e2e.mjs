@@ -89,7 +89,7 @@ if (RUN_BUILD) {
         transcript: 'Minimal todo app with premium dark UI and voice add',
         brief: { vision: 'Voice-first todo', keyFeatures: ['voice add', 'dark UI'] },
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(55000),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)

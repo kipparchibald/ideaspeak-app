@@ -1,4 +1,4 @@
-import { chatCompletion, getApiKey, xaiError } from './xai.js'
+import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -29,11 +29,7 @@ export default async function handler(req) {
   }
 
   const content = data.choices?.[0]?.message?.content || ''
-  let parsed = null
-  try {
-    const m = content.match(/\{[\s\S]*\}/)
-    parsed = m ? JSON.parse(m[0]) : null
-  } catch {}
+  const parsed = parseJsonFromContent(content)
 
   return new Response(JSON.stringify({ content, parsed }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },

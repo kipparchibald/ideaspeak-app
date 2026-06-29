@@ -105,6 +105,7 @@ bun run smoke:local
 | `SIMULATOR` badge | Add `XAI_API_KEY` in Vercel → Production, redeploy |
 | Status says not live | Key empty or invalid — re-add at [console.x.ai](https://console.x.ai) |
 | Voice sounds robotic | Hard refresh; voice uses short replies + TTS sanitization |
+| Build times out (60s) | Edge limit — build requests a compact 4-file v1 slice; retry or refine in Cursor |
 | Build returns error | Check Vercel logs; build uses `grok-build-0.1` |
 
 ## Quality bar checklist

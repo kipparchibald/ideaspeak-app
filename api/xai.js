@@ -66,6 +66,21 @@ export async function buildCompletion(apiKey, { messages, maxTokens = 8000, temp
   return { ok: res.ok, status: res.status, data }
 }
 
+/** Extract JSON object from LLM output (handles markdown fences) */
+export function parseJsonFromContent(content) {
+  if (!content) return null
+  let text = content.trim()
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fence) text = fence[1].trim()
+  const m = text.match(/\{[\s\S]*\}/)
+  if (!m) return null
+  try {
+    return JSON.parse(m[0])
+  } catch {
+    return null
+  }
+}
+
 /** Lightweight ping to verify key + model access */
 export async function pingXai(apiKey) {
   return chatCompletion(apiKey, {
