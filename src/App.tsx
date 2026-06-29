@@ -1848,10 +1848,31 @@ export default function IdeaSpeak() {
     setSelectedPersonality, setSelectedVoice
   } = useAppStore()
 
+  const [refinementText, setRefinementText] = useState('')
+  const [modalXaiKey, setModalXaiKey] = useState('')
+  const [modalGithubToken, setModalGithubToken] = useState('')
+  const [liveInterim, setLiveInterim] = useState('')
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null)
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [wakeLock, setWakeLock] = useState<any>(null)
+  const [speakResponses, setSpeakResponses] = useState(true)
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([])
+  const [voiceChatActive, setVoiceChatActive] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
+  const recognitionRef = useRef<any>(null)
+  const bargeRecognitionRef = useRef<any>(null)
+  const voiceChatActiveRef = useRef(false)
+  const voiceStatusRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+
   // PWA + Notifications setup
   useEffect(() => {
-    // Register service worker for PWA install + background notifications
     if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => {
+          registration.update().catch(() => {});
+        });
+      });
       navigator.serviceWorker.register('/sw.js').then(() => {
         console.log('IdeaSpeak SW registered for PWA + push');
       }).catch(console.error);
@@ -1911,23 +1932,6 @@ export default function IdeaSpeak() {
     window.addEventListener('online', handleOnline)
     return () => window.removeEventListener('online', handleOnline)
   }, [promptQueue, isBuilding]);
-
-  const [refinementText, setRefinementText] = useState('')
-  const [modalXaiKey, setModalXaiKey] = useState('')
-  const [modalGithubToken, setModalGithubToken] = useState('')
-  const [liveInterim, setLiveInterim] = useState('')
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null) // base64 data URL for vision
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null) // for PWA install
-  const [wakeLock, setWakeLock] = useState<any>(null)
-  const [speakResponses, setSpeakResponses] = useState(true) // toggle TTS — some device voices sound more "bot" than others
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([])
-  const [voiceChatActive, setVoiceChatActive] = useState(false)
-  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
-  const recognitionRef = useRef<any>(null)
-  const bargeRecognitionRef = useRef<any>(null)
-  const voiceChatActiveRef = useRef(false)
-  const voiceStatusRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
-  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
 
   // Detect public preview deployments (Vercel / Netlify) so we can show friendly messaging
   const isPublicPreview = typeof window !== 'undefined' && 

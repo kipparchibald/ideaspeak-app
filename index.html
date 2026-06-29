@@ -17,6 +17,25 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="IdeaSpeak — Speak ideas. Build apps." />
     <meta name="twitter:description" content="Voice-first app builder powered by xAI." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      #root:empty {
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+        background: #0a0a0f;
+        color: #e8e8f0;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      #root:empty::after {
+        content: 'Loading IdeaSpeak…';
+        font-size: 1.125rem;
+        letter-spacing: -0.02em;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

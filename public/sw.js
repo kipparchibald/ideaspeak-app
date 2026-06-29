@@ -1,49 +1,65 @@
-// IdeaSpeak Service Worker
-// Supports PWA install, offline caching for the builder, and push notifications for "build complete"
+// IdeaSpeak Service Worker — network-first for HTML so deploys never serve stale shells
 
-const CACHE_NAME = 'ideaspeak-v1';
-const urlsToCache = [
-  '/',
-  '/index.html',
+const CACHE_NAME = 'ideaspeak-v2';
+const STATIC_CACHE = [
   '/manifest.json',
-  '/favicon.svg'
-  // Add more hashed assets if you build for production
+  '/favicon.svg',
 ];
 
-// Install - cache core assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(urlsToCache))
+      .then((cache) => cache.addAll(STATIC_CACHE))
       .then(() => self.skipWaiting())
   );
 });
 
-// Activate - clean old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    caches.keys().then((cacheNames) =>
+      Promise.all(
         cacheNames
           .filter((name) => name !== CACHE_NAME)
           .map((name) => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
+      )
+    ).then(() => self.clients.claim())
   );
 });
 
-// Fetch - serve from cache when possible (offline support for the builder UI)
 self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const isNavigation =
+    request.mode === 'navigate' ||
+    request.destination === 'document' ||
+    (request.method === 'GET' && request.url.endsWith('/'));
+
+  // Always fetch fresh HTML — never serve a cached shell with outdated asset hashes
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request).catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
+  // Hashed build assets: network first, fall back to cache
+  if (request.url.includes('/assets/')) {
+    event.respondWith(
+      fetch(request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      }).catch(() => caches.match(request))
+    );
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached version or fetch fresh
-        return response || fetch(event.request);
-      })
+    caches.match(request).then((cached) => cached || fetch(request))
   );
 });
 
-// Push notification handling (for when a build finishes in background)
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
   const title = data.title || 'IdeaSpeak';
@@ -51,15 +67,12 @@ self.addEventListener('push', (event) => {
     body: data.body || 'Your app build is complete!',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    data: data.data || { url: '/' }
+    data: data.data || { url: '/' },
   };
 
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Notification click - open the app
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = event.notification.data?.url || '/';
