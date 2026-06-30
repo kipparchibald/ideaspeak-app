@@ -1,11 +1,10 @@
 // xAI / Grok API client — uses same-origin /api/* on Vercel, localhost:3001 in dev
 
-const DEV_API = 'http://localhost:3001'
 const IS_DEV = import.meta.env.DEV
 
 function apiUrl(path: string): string {
-  const base = IS_DEV ? DEV_API : ''
-  return `${base}${path}`
+  // Same-origin in prod and dev (Vite proxies /api → localhost:3001)
+  return path
 }
 
 function apiHeaders(apiKey?: string): Record<string, string> {
@@ -120,9 +119,20 @@ export async function generateWithLLM(
     method: 'POST',
     headers: apiHeaders(apiKey),
     body: JSON.stringify({ transcript, brief, personality }),
+    signal: AbortSignal.timeout(115000),
   })
 
-  const data = await res.json()
+  if (res.status === 504) {
+    throw new Error('Build timed out — try again or export and refine in Cursor/Grok')
+  }
+
+  let data: { error?: string; content?: string; parsed?: { files?: Record<string, string>; name?: string; plan?: string } }
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error(`Build error ${res.status} — invalid response`)
+  }
+
   if (!res.ok) throw new Error(data.error || `Build error ${res.status}`)
 
   if (data.parsed?.files) {
@@ -130,10 +140,10 @@ export async function generateWithLLM(
       files: normalizeProjectFiles(data.parsed.files),
       name: data.parsed.name || 'IdeaSpeak App',
       plan: data.parsed.plan || 'LLM generated',
-      raw: data.content,
+      raw: data.content || '',
     }
   }
-  throw new Error('No structured files from LLM')
+  throw new Error('Build returned no parseable files — try again')
 }
 
 export async function discussWithGrok(
@@ -154,7 +164,12 @@ export async function discussWithGrok(
     if (!res.ok) throw new Error(data.error || `Discuss error ${res.status}`)
     return data.content || "The agent didn't return a response."
   } catch (e) {
-    console.warn('Discuss call failed, using simulator:', e)
+    const live = getCachedGrokStatus()?.live
+    if (live) {
+      console.warn('Discuss call failed while Grok live:', e)
+      throw e
+    }
+    console.warn('Discuss offline, using fallback:', e)
     return simulateDiscuss(messages, personality, voiceMode)
   }
 }

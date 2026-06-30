@@ -1,4 +1,5 @@
-export const config = { runtime: 'edge', maxDuration: 60 }
+/** Node runtime — grok-build needs >60s; Edge times out */
+export const config = { maxDuration: 120 }
 
 const MODEL = 'grok-build-0.1'
 
@@ -7,7 +8,7 @@ const BUILD_SYSTEM = `You are IdeaSpeak build agent. Output ONLY raw JSON, no ma
 Exactly 4 files. Compact, production-quality vertical slice.`
 
 function getApiKey(req) {
-  const key = req.headers.get('x-ai-key') || req.headers.get('X-AI-Key') || process.env.XAI_API_KEY
+  const key = req.headers['x-ai-key'] || req.headers['X-AI-Key'] || process.env.XAI_API_KEY
   return typeof key === 'string' ? key.trim() : ''
 }
 
@@ -18,48 +19,61 @@ function parseJson(content) {
   if (fence) t = fence[1].trim()
   const m = t.match(/\{[\s\S]*\}/)
   if (!m) return null
-  try { return JSON.parse(m[0]) } catch { return null }
+  try {
+    return JSON.parse(m[0])
+  } catch {
+    return null
+  }
 }
 
-export default async function handler(req) {
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-AI-Key')
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*' } })
+    return res.status(204).end()
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
   }
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
+    return res.status(401).json({ error: 'Missing X-AI-Key' })
   }
 
-  const { transcript, brief } = await req.json()
+  const { transcript, brief, personality = 'grok' } = req.body || {}
   const user = brief
     ? `Build tight v1: ${JSON.stringify(brief)}`
-    : `Build tight v1: ${transcript}`
+    : `Build tight v1: ${transcript || ''}`
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: BUILD_SYSTEM },
-        { role: 'user', content: user },
-      ],
-      temperature: 0.5,
-      max_tokens: 3200,
-    }),
-  })
+  try {
+    const upstream = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: BUILD_SYSTEM + (personality !== 'grok' ? ` Style: ${personality}.` : '') },
+          { role: 'user', content: user },
+        ],
+        temperature: 0.5,
+        max_tokens: 4500,
+      }),
+    })
 
-  const data = await res.json()
-  if (!res.ok) {
-    const err = data?.error?.message || data?.error || 'xAI error'
-    return new Response(JSON.stringify({ error: err }), { status: 500 })
+    const data = await upstream.json()
+    if (!upstream.ok) {
+      const err = data?.error?.message || data?.error || 'xAI error'
+      return res.status(500).json({ error: err })
+    }
+
+    const content = data.choices?.[0]?.message?.content || ''
+    const parsed = parseJson(content)
+    return res.status(200).json({ content, parsed })
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || 'Build failed' })
   }
-
-  const content = data.choices?.[0]?.message?.content || ''
-  const parsed = parseJson(content)
-
-  return new Response(JSON.stringify({ content, parsed }), {
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-  })
 }

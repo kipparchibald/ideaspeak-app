@@ -89,19 +89,13 @@ if (RUN_BUILD) {
         transcript: 'Minimal todo app with premium dark UI and voice add',
         brief: { vision: 'Voice-first todo', keyFeatures: ['voice add', 'dark UI'] },
       }),
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(110000),
     })
-    if (res.status === 504) {
-      console.log('⚠ POST /api/build timed out (60s Edge) — discuss/refine/export still OK; finish build in Cursor')
-      return 'timeout (expected on Edge; use export + Grok /implement)'
-    }
+    if (res.status === 504) throw new Error('Build timed out — Node 120s should prevent this; check Vercel logs')
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
     if (!data.parsed?.files?.['src/App.tsx']) {
-      if ((data.content || '').length > 400) {
-        return `unparsed but ${data.content.length} chars returned`
-      }
-      throw new Error('failed to parse build JSON')
+      throw new Error(data.parsed ? 'missing App.tsx in build output' : 'failed to parse build JSON')
     }
     return `${Object.keys(data.parsed.files).length} files — ${data.parsed.name}`
   })

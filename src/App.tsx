@@ -694,16 +694,27 @@ jobs:
 
       set(state => ({ conversation: [...state.conversation, assistantMsg] }))
     } catch (e) {
-      const lastUser = text.trim();
-      // Conversational short fallback when in voice mode
+      const err = e instanceof Error ? e.message : 'Request failed'
+      const { grokLive } = get()
+      if (grokLive) {
+        toast.error(`Grok error: ${err}`)
+        const assistantMsg: ConversationMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `Hit a snag talking to Grok — ${err}. Try again in a moment.`,
+        }
+        set(state => ({ conversation: [...state.conversation, assistantMsg] }))
+        return
+      }
+      const lastUser = text.trim()
       const snippet = lastUser.slice(0, 60).trim()
-      const fallback = voiceMode 
+      const fallback = voiceMode
         ? (snippet ? `Got it — "${snippet}" — we'll nail one polished slice in v1. What's the core loop users do daily?` : `Talk me through it — we'll land on something buildable that looks way more pro than you'd expect.`)
         : `(offline) On "${snippet || 'your idea'}" — who's the user, what's the #1 job, and what would make v1 feel impressively real?`
       const assistantMsg: ConversationMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: fallback
+        content: fallback,
       }
       set(state => ({ conversation: [...state.conversation, assistantMsg] }))
     }
@@ -743,6 +754,13 @@ jobs:
       get().notifyBuildComplete(result?.name || project.name, true)
       toast.success('Plan handed to the builder!')
     } catch (e) {
+      const { grokLive } = get()
+      const msg = e instanceof Error ? e.message : 'Build failed'
+      if (grokLive) {
+        set({ isBuilding: false })
+        toast.error(`Grok build failed: ${msg}`)
+        return
+      }
       const basicBrief = { vision: planText.slice(0, 180), keyFeatures: ['Core from plan'] }
       // @ts-ignore - function defined later
       const { files, name } = generateNativeProject(basicBrief, selectedPersonality)
@@ -757,7 +775,7 @@ jobs:
       set({ currentProject: project, isBuilding: false })
       useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(project) })
       get().notifyBuildComplete(name, false)
-      toast('Switched to build (simulator)')
+      toast('Build unavailable — using simulator scaffold')
     }
   },
 
@@ -2322,6 +2340,8 @@ export default function IdeaSpeak() {
     const { conversation: conv } = useAppStore.getState()
     const isFresh = conv.length === 0
     if (isFresh) {
+      setVoiceStatus('speaking')
+      voiceStatusRef.current = 'speaking'
       const opener: ConversationMessage = {
         id: `voice-opener-${Date.now()}`,
         role: 'assistant',
