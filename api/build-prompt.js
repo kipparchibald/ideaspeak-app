@@ -16,7 +16,8 @@ Output ONLY raw JSON (no markdown fences, no commentary):
 }
 
 Rules:
-- Exactly 5 files as shown. Each value is complete source code string.
+- Exactly 5 files as shown. Each value is complete source code as a valid JSON string (escape newlines as \\n, quotes as \\").
+- Output must be parseable by JSON.parse with zero errors.
 - One vertical slice that feels shippable — empty/loading states, accessible markup.
 - Sacred design tokens in CSS — no random inline colors.
 - Mobile-friendly layout. Delightful micro-interactions where cheap.

@@ -1,3 +1,4 @@
+import { jsonrepair } from 'jsonrepair'
 import { BUILD_SYSTEM } from './build-prompt.js'
 
 /** Node runtime — grok-build needs >60s; Edge times out */
@@ -20,7 +21,11 @@ function parseJson(content) {
   try {
     return JSON.parse(m[0])
   } catch {
-    return null
+    try {
+      return JSON.parse(jsonrepair(m[0]))
+    } catch {
+      return null
+    }
   }
 }
 
