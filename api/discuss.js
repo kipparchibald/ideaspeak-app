@@ -1,23 +1,23 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 import { chatCompletion, getApiKey, xaiError } from './xai.js'
+import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, X-AI-Key',
-      },
-    })
+    return new Response(null, { status: 204, headers: corsHeaders(req) })
   }
+
+  const blocked = rejectBlockedOrigin(req)
+  if (blocked) return blocked
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
+    return new Response(JSON.stringify({ error: 'Grok API not configured on server' }), {
+      status: 401,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   const { messages, image, personality = 'grok', voiceMode } = await req.json()
@@ -47,7 +47,10 @@ export default async function handler(req) {
   })
 
   if (!ok) {
-    return new Response(JSON.stringify({ error: xaiError(data) }), { status: 500 })
+    return new Response(JSON.stringify({ error: xaiError(data) }), {
+      status: 500,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   let content = data.choices?.[0]?.message?.content || ''
@@ -56,6 +59,6 @@ export default async function handler(req) {
   }
 
   return new Response(JSON.stringify({ content, voiceMode: !!voiceMode }), {
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
   })
 }

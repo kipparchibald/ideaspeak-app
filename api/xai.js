@@ -5,12 +5,27 @@ export const MODELS = {
   build: 'grok-build-0.1',
 }
 
-export function getApiKey(req) {
+function readHeaderKey(req) {
   const key =
     req?.headers?.get?.('x-ai-key') ||
     req?.headers?.get?.('X-AI-Key') ||
-    process.env.XAI_API_KEY
+    req?.headers?.['x-ai-key'] ||
+    req?.headers?.['X-AI-Key']
   return typeof key === 'string' ? key.trim() : ''
+}
+
+/** Server env key only in production; client header allowed only for local dev fallback */
+export function getApiKey(req) {
+  const serverKey = process.env.XAI_API_KEY?.trim()
+  if (serverKey) return serverKey
+
+  if (process.env.VERCEL_ENV === 'production') return ''
+
+  return readHeaderKey(req)
+}
+
+export function hasServerApiKey() {
+  return !!process.env.XAI_API_KEY?.trim()
 }
 
 export function xaiError(data, fallback = 'xAI error') {

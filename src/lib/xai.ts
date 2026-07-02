@@ -9,6 +9,8 @@ function apiUrl(path: string): string {
 
 function apiHeaders(apiKey?: string): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  // Production uses server-hosted key only — never send client keys from the browser
+  if (import.meta.env.PROD) return headers
   const key = apiKey || localStorage.getItem('ideaspeak_xai_key')
   if (key) headers['X-AI-Key'] = key
   return headers
@@ -30,25 +32,30 @@ let cachedStatus: GrokStatus | null = null
 
 export async function fetchGrokStatus(): Promise<GrokStatus> {
   try {
-    const res = await fetch(apiUrl('/api/status'))
+    const res = await fetch(apiUrl('/api/status'), { headers: apiHeaders() })
     if (!res.ok) throw new Error('status failed')
     const data = await res.json()
-    const clientKey = localStorage.getItem('ideaspeak_xai_key')
+    const clientKey = IS_DEV ? localStorage.getItem('ideaspeak_xai_key') : null
+    const live = data.live || (!import.meta.env.PROD && !!clientKey)
     cachedStatus = {
-      live: data.live || !!clientKey,
+      live,
       source: data.live ? 'server' : clientKey ? 'client' : 'none',
-      message: data.message,
+      message: data.live
+        ? data.message
+        : IS_DEV && clientKey
+          ? 'Grok API ready via local dev key'
+          : data.message,
       model: data.model,
     }
     return cachedStatus
   } catch {
-    const clientKey = localStorage.getItem('ideaspeak_xai_key')
+    const clientKey = IS_DEV ? localStorage.getItem('ideaspeak_xai_key') : null
     cachedStatus = {
       live: !!clientKey,
       source: clientKey ? 'client' : 'none',
       message: IS_DEV
-        ? 'Run `bun run dev:full` for local Grok proxy, or add key in Settings'
-        : 'Add XAI_API_KEY to Vercel or paste key in Settings',
+        ? 'Run `bun run dev:full` and `bun run setup:grok` for local Grok'
+        : 'Grok API is configured on the server — check Vercel env on ideaspeak-app',
     }
     return cachedStatus
   }
@@ -161,7 +168,14 @@ export async function discussWithGrok(
     })
 
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || `Discuss error ${res.status}`)
+    if (!res.ok) {
+      // Missing/invalid key — always fall back so voice chat still responds
+      if (res.status === 401 || res.status === 403) {
+        console.warn('Discuss auth failed, using conversational fallback')
+        return simulateDiscuss(messages, personality, voiceMode)
+      }
+      throw new Error(data.error || `Discuss error ${res.status}`)
+    }
     return data.content || "The agent didn't return a response."
   } catch (e) {
     const live = getCachedGrokStatus()?.live

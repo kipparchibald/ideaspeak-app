@@ -1,8 +1,16 @@
-import { getApiKey, pingXai, xaiError, MODELS } from './xai.js'
+import { getApiKey, hasServerApiKey, pingXai, xaiError, MODELS } from './xai.js'
+import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(req) {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders(req) })
+  }
+
+  const blocked = rejectBlockedOrigin(req)
+  if (blocked) return blocked
+
   const apiKey = getApiKey(req)
 
   if (!apiKey) {
@@ -11,9 +19,11 @@ export default async function handler(req) {
         live: false,
         source: 'none',
         model: MODELS.chat,
-        message: 'Add XAI_API_KEY to Vercel env vars or paste key in Settings',
+        message: hasServerApiKey()
+          ? 'Server key configured but unavailable'
+          : 'Add XAI_API_KEY to Vercel (ideaspeak-app → Production) or .env.local for local dev',
       }),
-      { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
     )
   }
 
@@ -27,7 +37,7 @@ export default async function handler(req) {
         model: MODELS.chat,
         message: xaiError(data, 'xAI key invalid or API unreachable'),
       }),
-      { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
     )
   }
 
@@ -36,8 +46,10 @@ export default async function handler(req) {
       live: true,
       source: 'server',
       model: MODELS.chat,
-      message: 'Grok API ready via server',
+      message: hasServerApiKey()
+        ? 'Grok API ready — key hosted securely on server'
+        : 'Grok API ready via dev proxy',
     }),
-    { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+    { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
   )
 }

@@ -1,22 +1,22 @@
 import { getApiKey, xaiError } from './xai.js'
+import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, X-AI-Key',
-      },
-    })
+    return new Response(null, { status: 204, headers: corsHeaders(req) })
   }
+
+  const blocked = rejectBlockedOrigin(req)
+  if (blocked) return blocked
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
+    return new Response(JSON.stringify({ error: 'Grok API not configured on server' }), {
+      status: 401,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   const { prompt, size = '1024x1024' } = await req.json()
@@ -38,10 +38,13 @@ export default async function handler(req) {
 
   const data = await res.json()
   if (!res.ok) {
-    return new Response(JSON.stringify({ error: xaiError(data, 'Image gen failed') }), { status: 500 })
+    return new Response(JSON.stringify({ error: xaiError(data, 'Image gen failed') }), {
+      status: 500,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   return new Response(JSON.stringify(data), {
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
   })
 }

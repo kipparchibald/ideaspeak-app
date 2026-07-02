@@ -1,4 +1,23 @@
 import { serve } from 'bun';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+
+/** Load XAI_API_KEY from project-root .env.local (bun run dev:full) */
+function loadEnvLocal() {
+  const p = join(import.meta.dir, '..', '.env.local');
+  if (!existsSync(p)) return;
+  try {
+    const text = readFileSync(p, 'utf8');
+    for (const line of text.split('\n')) {
+      const m = line.match(/^XAI_API_KEY=["']?([^"'\s#]+)["']?/);
+      if (m?.[1]?.trim()) {
+        process.env.XAI_API_KEY = m[1].trim();
+        return;
+      }
+    }
+  } catch { /* ignore */ }
+}
+loadEnvLocal();
 
 // Enhanced Bun server stub for IdeaSpeak backend
 // - Proxies xAI API calls (key stays out of browser in production deploys)
@@ -6,6 +25,64 @@ import { serve } from 'bun';
 // - This moves logic server-side for security and allows 100% LLM-driven code gen
 
 const XAI_API = 'https://api.x.ai/v1/chat/completions';
+
+function resolveApiKey(req: Request): string {
+  const serverKey = process.env.XAI_API_KEY?.trim();
+  if (serverKey) return serverKey;
+  if (process.env.VERCEL_ENV === 'production') return '';
+  return (
+    req.headers.get('X-AI-Key') ||
+    req.headers.get('x-ai-key') ||
+    ''
+  );
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return true;
+  const allowed = new Set([
+    'https://ideaspeak-app.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ]);
+  if (allowed.has(origin)) return true;
+  try {
+    const { hostname } = new URL(origin);
+    return (hostname.endsWith('.vercel.app') && hostname.includes('ideaspeak')) ||
+      hostname === 'localhost' || hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function humanizeVoiceReply(text: string): string {
+  if (!text) return text;
+  let t = text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .replace(/\n+/g, ' ')
+    .trim();
+  const sentences = t.match(/[^.!?]+[.!?]+/g) || [t];
+  if (sentences.length > 3) t = sentences.slice(0, 3).join(' ').trim();
+  const words = t.split(/\s+/);
+  if (words.length > 58) t = words.slice(0, 58).join(' ') + '?';
+  return t;
+}
+
+async function pingXai(apiKey: string): Promise<boolean> {
+  const res = await fetch(XAI_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: 'grok-4.3',
+      messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
+      max_tokens: 8,
+      reasoning_effort: 'none',
+    }),
+  });
+  return res.ok;
+}
 
 async function loadPrompt(file: string): Promise<string> {
   try {
@@ -42,12 +119,17 @@ const server = serve({
   port: 3001,
   async fetch(req) {
     const url = new URL(req.url);
-    const origin = req.headers.get('origin') || '*';
+    const origin = req.headers.get('origin') || '';
+
+    if (origin && !isAllowedOrigin(origin)) {
+      return Response.json({ error: 'Forbidden origin' }, { status: 403 });
+    }
 
     const cors = {
-      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Origin': origin || 'http://localhost:5173',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-AI-Key',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      Vary: 'Origin',
     };
 
     if (req.method === 'OPTIONS') {
@@ -58,7 +140,26 @@ const server = serve({
       return Response.json({ status: 'ok', time: new Date().toISOString() }, { headers: cors });
     }
 
-    const apiKey = req.headers.get('X-AI-Key') || req.headers.get('Authorization')?.replace('Bearer ', '');
+    const apiKey = resolveApiKey(req);
+
+    if (url.pathname === '/api/status') {
+      if (!apiKey) {
+        return Response.json(
+          { live: false, source: 'none', model: 'grok-4.3', message: 'Add XAI_API_KEY to .env.local (run: bun run setup:grok)' },
+          { headers: cors }
+        );
+      }
+      const live = await pingXai(apiKey);
+      return Response.json(
+        {
+          live,
+          source: 'server',
+          model: 'grok-4.3',
+          message: live ? 'Grok API ready via server' : 'xAI key invalid or unreachable',
+        },
+        { headers: cors }
+      );
+    }
 
     if (url.pathname === '/api/xai' && req.method === 'POST') {
       if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers: cors });
@@ -159,9 +260,17 @@ Use modern React 19 + TS + Tailwind. Make UIs stunning per the manifesto (Linear
     // Uses the agent prompt but instructs to stay in collaborative planning mode.
     // Supports vision: if image (base64 data URL) is provided, include as vision message.
     if (url.pathname === '/api/discuss' && req.method === 'POST') {
-      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers: cors });
+      const body = await req.json();
+      const { messages, image, personality = 'grok', voiceMode } = body;
+      if (!apiKey) {
+        const lastUser = (messages || []).filter((m: { role: string }) => m.role === 'user').pop()?.content || '';
+        const snippet = String(lastUser).slice(0, 60).trim();
+        const content = voiceMode
+          ? (snippet ? `Okay — "${snippet}" — what's the one daily action users take?` : `Walk me through it — what's the one-liner?`)
+          : `(offline) On "${snippet || 'your idea'}" — who's the user and what's the #1 job?`;
+        return Response.json({ content, voiceMode: !!voiceMode, offline: true }, { headers: cors });
+      }
       try {
-        const { messages, image, personality = 'grok', voiceMode } = await req.json(); // messages + optional image base64 + personality + voiceMode for real conversational flow
         const agentPrompt = await loadPrompt('IdeaSpeak-xAI-Agent-System-Prompt.md');
 
         // Personality flavor for fun customization
@@ -222,8 +331,9 @@ When the user is ready, summarize the agreed plan clearly so it can be handed of
           }
         }
 
-        const content = await callXaiProxy(fullMessages, apiKey, 'grok-4.3', voiceMode ? 'none' : 'low');
-        return Response.json({ content }, { headers: cors });
+        let content = await callXaiProxy(fullMessages, apiKey, 'grok-4.3', voiceMode ? 'none' : 'low');
+        if (voiceMode) content = humanizeVoiceReply(content);
+        return Response.json({ content, voiceMode: !!voiceMode }, { headers: cors });
       } catch (e: any) {
         return Response.json({ error: e.message }, { status: 500, headers: cors });
       }
@@ -299,4 +409,7 @@ When the user is ready, summarize the agreed plan clearly so it can be handed of
 });
 
 console.log(`IdeaSpeak backend running on http://localhost:${server.port}`);
+console.log(process.env.XAI_API_KEY?.trim()
+  ? '[IdeaSpeak] XAI_API_KEY loaded from .env.local — LIVE GROK'
+  : '[IdeaSpeak] No XAI_API_KEY in .env.local — paste key in Settings or run: bun run setup:grok');
 console.log('Use /api/refine and /api/build for full LLM-driven structured generation with real prompts.');

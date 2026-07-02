@@ -1,4 +1,5 @@
 import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
+import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -6,9 +7,19 @@ const REFINE_SYSTEM = `You are the IdeaSpeak Voice Refiner. Elevate raw spoken t
 Output ONLY valid JSON: { "brief": { "vision": "...", "users": "...", "keyFeatures": ["..."], "tech": "..." }, "optimizedPrompt": "..." }`
 
 export default async function handler(req) {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders(req) })
+  }
+
+  const blocked = rejectBlockedOrigin(req)
+  if (blocked) return blocked
+
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing X-AI-Key' }), { status: 401 })
+    return new Response(JSON.stringify({ error: 'Grok API not configured on server' }), {
+      status: 401,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   const { transcript, history = [] } = await req.json()
@@ -25,13 +36,16 @@ export default async function handler(req) {
   })
 
   if (!ok) {
-    return new Response(JSON.stringify({ error: xaiError(data) }), { status: 500 })
+    return new Response(JSON.stringify({ error: xaiError(data) }), {
+      status: 500,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    })
   }
 
   const content = data.choices?.[0]?.message?.content || ''
   const parsed = parseJsonFromContent(content)
 
   return new Response(JSON.stringify({ content, parsed }), {
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
   })
 }

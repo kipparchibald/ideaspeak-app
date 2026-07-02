@@ -639,9 +639,13 @@ jobs:
   setShowSettings: (show) => set({ showSettings: show }),
   
   updateXaiKey: (key) => {
+    if (import.meta.env.PROD) {
+      toast.info('Production uses the server-hosted key — add XAI_API_KEY in Vercel, not the browser')
+      return
+    }
     localStorage.setItem('ideaspeak_xai_key', key)
     set({ xaiApiKey: key, grokLive: !!key || get().grokSource === 'server', grokSource: key ? 'client' : get().grokSource })
-    toast.success('xAI API key saved')
+    toast.success('Dev API key saved (local only)')
     get().refreshGrokStatus()
   },
 
@@ -3219,35 +3223,50 @@ export default function IdeaSpeak() {
               <button type="button" onClick={() => setShowSettings(false)} className="text-[#666] hover:text-[#e8e8f0]">Close</button>
             </div>
               <p className="text-sm text-[#888] mb-2">
-                Status: <span className={grokLive ? 'text-[#00ff88]' : 'text-amber-300'}>{grokLive ? `Live Grok (${grokSource})` : 'Simulator — no API key detected'}</span>
+                Status: <span className={grokLive ? 'text-[#00ff88]' : 'text-amber-300'}>
+                  {grokLive
+                    ? grokSource === 'server'
+                      ? 'Live Grok · secure server key'
+                      : `Live Grok (${grokSource})`
+                    : 'Simulator — no API key detected'}
+                </span>
               </p>
               <div className="text-sm text-[#888] mb-4 p-3 rounded-2xl bg-[#111116] border border-[#1f1f27]">
-                <p className="mb-2"><strong className="text-[#e8e8f0]">Lovable-style setup (recommended):</strong></p>
-                <p className="mb-2">Lovable hosts the API key — visitors never see it. Do the same:</p>
+                <p className="mb-2"><strong className="text-[#e8e8f0]">Secure setup (production):</strong></p>
+                <p className="mb-2">Your xAI key stays on Vercel — never in the browser, never in git.</p>
                 <ol className="list-decimal list-inside space-y-1 text-xs">
                   <li>Get key at <a href="https://console.x.ai/" target="_blank" rel="noreferrer" className="text-[#00ff88] underline">console.x.ai</a></li>
-                  <li>Vercel → ideaspeak-app → Settings → Environment Variables</li>
-                  <li>Add <code>XAI_API_KEY</code> = your key (Production)</li>
-                  <li>Redeploy — everyone gets real Grok, no Settings needed</li>
+                  <li>Vercel → project <strong>ideaspeak-app</strong> → Settings → Environment Variables</li>
+                  <li>Add <code>XAI_API_KEY</code> = your key → scope <strong>Production</strong> only</li>
+                  <li>Redeploy: <code>bun run deploy</code></li>
                 </ol>
-                <p className="mt-2 text-xs">Or run locally: <code>./scripts/enable-grok-demo.sh</code></p>
+                {grokSource === 'server' && (
+                  <p className="mt-2 text-xs text-[#00ff88]">✓ Server key active — visitors use Grok without pasting anything.</p>
+                )}
               </div>
-              <p className="text-sm text-[#888] mb-4">Personal key (works immediately for just you):</p>
-              <div className="flex gap-2 mb-4">
-                <input 
-                  type="password" 
-                  value={modalXaiKey} 
-                  onChange={e => setModalXaiKey(e.target.value)} 
-                  placeholder="xai-..." 
-                  className="flex-1 bg-black border border-[#1f1f27] rounded-2xl px-4 py-3 font-mono text-sm" 
-                />
-                <button 
-                  onClick={() => { updateXaiKey(modalXaiKey); }} 
-                  className="px-4 py-2 bg-[#00ff88] text-[#0a0a0f] rounded-2xl text-sm font-semibold"
-                >
-                  Save
-                </button>
-              </div>
+              {import.meta.env.DEV && (
+                <>
+                  <p className="text-sm text-[#888] mb-2">Local dev (recommended: server key in <code>.env.local</code>):</p>
+                  <p className="text-xs text-[#666] mb-3">Run in Terminal: <code>bun run setup:grok</code> then restart <code>bun run dev:full</code></p>
+                  <p className="text-sm text-[#888] mb-2">Or paste a dev-only browser key (fallback):</p>
+                  <div className="flex gap-2 mb-4">
+                    <input 
+                      type="password" 
+                      value={modalXaiKey} 
+                      onChange={e => setModalXaiKey(e.target.value)} 
+                      placeholder="xai-..." 
+                      className="flex-1 bg-black border border-[#1f1f27] rounded-2xl px-4 py-3 font-mono text-sm" 
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => { updateXaiKey(modalXaiKey); }} 
+                      className="px-4 py-2 bg-[#00ff88] text-[#0a0a0f] rounded-2xl text-sm font-semibold"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </>
+              )}
               <p className="text-sm text-[#888] mb-2">GitHub token (for "Export to GitHub" - needs 'repo' scope)</p>
               <div className="flex gap-2">
                 <input 
@@ -3264,7 +3283,11 @@ export default function IdeaSpeak() {
                   Save
                 </button>
               </div>
-              <div className="text-[10px] text-[#555] mt-3">Keys stored only in browser localStorage. Backend proxy recommended for production.</div>
+              <div className="text-[10px] text-[#555] mt-3">
+                {import.meta.env.PROD
+                  ? 'Grok API key is hosted on Vercel (ideaspeak-app). GitHub token stays in your browser only.'
+                  : 'Dev keys in .env.local are gitignored. Browser keys are local dev fallback only.'}
+              </div>
 
               <div className="mt-4 flex items-center justify-between">
                 <span className="text-sm">Speak agent replies aloud</span>

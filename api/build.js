@@ -1,15 +1,12 @@
 import { jsonrepair } from 'jsonrepair'
 import { BUILD_SYSTEM } from './build-prompt.js'
+import { getApiKey } from './xai.js'
+import { corsHeaders, isAllowedOrigin } from './security.js'
 
 /** Node runtime — grok-build needs >60s; Edge times out */
 export const config = { maxDuration: 120 }
 
 const MODEL = 'grok-build-0.1'
-
-function getApiKey(req) {
-  const key = req.headers['x-ai-key'] || req.headers['X-AI-Key'] || process.env.XAI_API_KEY
-  return typeof key === 'string' ? key.trim() : ''
-}
 
 function parseJson(content) {
   if (!content) return null
@@ -30,12 +27,18 @@ function parseJson(content) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-AI-Key')
+  const cors = corsHeaders(req)
+  for (const [key, value] of Object.entries(cors)) {
+    res.setHeader(key, value)
+  }
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end()
+  }
+
+  const origin = req.headers.origin || ''
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({ error: 'Forbidden origin' })
   }
 
   if (req.method !== 'POST') {
@@ -44,7 +47,7 @@ export default async function handler(req, res) {
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return res.status(401).json({ error: 'Missing X-AI-Key' })
+    return res.status(401).json({ error: 'Grok API not configured on server' })
   }
 
   const { transcript, brief, personality = 'grok' } = req.body || {}
