@@ -97,7 +97,9 @@ if (RUN_BUILD) {
     if (!data.parsed?.files?.['src/App.tsx']) {
       throw new Error(data.parsed ? 'missing App.tsx in build output' : 'failed to parse build JSON')
     }
-    return `${Object.keys(data.parsed.files).length} files — ${data.parsed.name}`
+    const fileCount = Object.keys(data.parsed.files).length
+    if (fileCount < 4) throw new Error(`only ${fileCount} files in build output`)
+    return `${fileCount} files — ${data.parsed.name}`
   })
 } else {
   console.log('⊘ POST /api/build skipped (pass --build to include)')

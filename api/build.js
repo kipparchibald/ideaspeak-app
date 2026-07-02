@@ -1,11 +1,9 @@
+import { BUILD_SYSTEM } from './build-prompt.js'
+
 /** Node runtime — grok-build needs >60s; Edge times out */
 export const config = { maxDuration: 120 }
 
 const MODEL = 'grok-build-0.1'
-
-const BUILD_SYSTEM = `You are IdeaSpeak build agent. Output ONLY raw JSON, no markdown.
-{"name":"App Name","plan":"one sentence","files":{"src/App.tsx":"complete React 19 TSX Tailwind dark UI","src/index.css":"design tokens","src/main.tsx":"entry","README.md":"readme"}}
-Exactly 4 files. Compact, production-quality vertical slice.`
 
 function getApiKey(req) {
   const key = req.headers['x-ai-key'] || req.headers['X-AI-Key'] || process.env.XAI_API_KEY
@@ -46,8 +44,14 @@ export default async function handler(req, res) {
 
   const { transcript, brief, personality = 'grok' } = req.body || {}
   const user = brief
-    ? `Build tight v1: ${JSON.stringify(brief)}`
-    : `Build tight v1: ${transcript || ''}`
+    ? `Build production v1 from this plan and brief:\n${transcript || ''}\n\nBrief: ${JSON.stringify(brief)}`
+    : `Build production v1 from this discussion/plan:\n${transcript || ''}`
+
+  const personalityNote =
+    personality === 'witty' ? ' Witty code comments.' :
+    personality === 'mentor' ? ' Wise mentor tone in copy.' :
+    personality === 'coach' ? ' Energetic motivational UI copy.' :
+    personality === 'rebel' ? ' Bold unconventional UI choices.' : ''
 
   try {
     const upstream = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -56,11 +60,11 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: BUILD_SYSTEM + (personality !== 'grok' ? ` Style: ${personality}.` : '') },
+          { role: 'system', content: BUILD_SYSTEM + personalityNote },
           { role: 'user', content: user },
         ],
-        temperature: 0.5,
-        max_tokens: 4500,
+        temperature: 0.55,
+        max_tokens: 5000,
       }),
     })
 

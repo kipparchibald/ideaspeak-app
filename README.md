@@ -53,11 +53,23 @@ grok
 # /check-work → /implement → ship via GitHub/Vercel MCP
 ```
 
+## Deploy (production)
+
+Owner one-time: set `XAI_API_KEY` in Vercel → Production (or run `./scripts/enable-grok-demo.sh`).
+
+```bash
+bun run deploy         # smoke → build → prebuilt Vercel deploy
+# or manually:
+bun x vercel build --prod && bun x vercel deploy --prebuilt --prod --yes
+```
+
+Live: [ideaspeak-app.vercel.app](https://ideaspeak-app.vercel.app)
+
 ## Smoke test
 
 ```bash
-bun run smoke          # production API + UI
-bun run smoke:full     # includes /api/build (~2 min)
+bun run smoke          # production API + UI (~15s)
+bun run smoke:full     # includes /api/build (~60s)
 ```
 
 ## Phone / PWA

@@ -680,10 +680,12 @@ jobs:
 
     try {
       const { discussWithGrok } = await import('./lib/xai')
-      const history = [...get().conversation, userMsg].map(m => ({ 
-        role: m.role as 'user' | 'assistant', 
-        content: m.content 
-      }))
+      const history = [...get().conversation, userMsg]
+        .filter(m => !String(m.id).startsWith('voice-opener'))
+        .map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        }))
       const response = await discussWithGrok(history, xaiApiKey || undefined, image || undefined, selectedPersonality || 'grok', voiceMode)
 
       const assistantMsg: ConversationMessage = {
@@ -721,15 +723,18 @@ jobs:
   },
 
   finalizeAndBuild: async () => {
-    const { conversation, xaiApiKey, selectedPersonality } = get()
-    if (conversation.length < 3) {
-      toast.error('Chat a bit more with the agent first.')
+    const { conversation, xaiApiKey, selectedPersonality, grokLive } = get()
+    const realMessages = conversation.filter(m => !String(m.id).startsWith('voice-opener'))
+    const userTurns = realMessages.filter(m => m.role === 'user').length
+    if (userTurns < 1) {
+      toast.error('Talk through your idea with Grok first — at least one exchange.')
       return
     }
 
     set({ isBuilding: true, mode: 'build' })
+    toast.info(grokLive ? 'Grok is building your app — usually 30–60 seconds…' : 'Generating scaffold…', { duration: 5000 })
 
-    const planText = conversation.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')
+    const planText = realMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')
 
     try {
       const { generateWithLLM } = await import('./lib/xai')
@@ -2659,15 +2664,15 @@ export default function IdeaSpeak() {
         )}
         {grokLive && (
           <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-2xl bg-[#00ff88]/10 border border-[#00ff88]/30 text-xs text-[#00ff88]">
-            Live Grok API{grokSource === 'server' ? ' (server key)' : ''} — real discuss, build, and refine.
+            Powered by Grok{grokSource === 'server' ? ' · hosted API' : ''} — voice, build, export, ship.
           </div>
         )}
         <div className="inline-flex items-center gap-2 px-4 py-1 rounded-2xl bg-[#13131a] border border-[#1f1f27] mb-4 text-sm">
           <div className="w-2 h-2 bg-[#00ff88] rounded-full animate-pulse" /> DISCUSSION &amp; PLANNING MODE
           <span className="ml-1">{personalities.find(p => p.id === selectedPersonality)?.emoji}</span>
         </div>
-        <h1 className="font-display text-5xl tracking-tighter font-semibold">Talk it through with Grok</h1>
-        <p className="mt-2 text-xl text-[#888]">One tap to start talking. Then it stays conversational — speak, interrupt, reply, just like a real person. The transcript below captures the full discussion for when you're ready to build.</p>
+        <h1 className="font-display text-5xl tracking-tighter font-semibold">Speak your idea. Ship a real app.</h1>
+        <p className="mt-2 text-xl text-[#888] max-w-2xl mx-auto">Voice conversation with Grok to scope a buildable v1 — then generate, preview, refine, and export a production-grade project.</p>
       </div>
 
       {/* Personality quick-switcher - fun tab-like selector for customization */}
@@ -2887,7 +2892,7 @@ export default function IdeaSpeak() {
           )}
         </div>
 
-        {conversation.length >= 4 && (
+        {conversation.filter(m => !String(m.id).startsWith('voice-opener') && m.role === 'user').length >= 1 && (
           <div className="mt-6 pt-6 border-t border-[#1f1f27] space-y-3">
             <button 
               onClick={finalizeAndBuild}
@@ -3143,11 +3148,25 @@ export default function IdeaSpeak() {
         </div>
       </nav>
 
+      {isBuilding && (
+        <div className="fixed inset-0 z-[200] bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="text-center max-w-sm">
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
+            <p className="font-semibold text-lg">Building your app</p>
+            <p className="text-sm text-[#888] mt-2">Grok is generating a polished vertical slice — usually 30–60 seconds.</p>
+          </div>
+        </div>
+      )}
+
       <ErrorBoundary>
       <div className="max-w-7xl mx-auto px-8 pt-10 pb-20">
         {mode === 'discuss' ? discussUI : buildUI}
       </div>
       </ErrorBoundary>
+
+      <footer className="border-t border-[#1f1f27] py-6 text-center text-[10px] text-[#555] tracking-wide">
+        IdeaSpeak v1.0 · Voice-first app builder · Powered by xAI Grok
+      </footer>
 
       {/* Modals */}
       <AnimatePresence>

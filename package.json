@@ -1,7 +1,7 @@
 {
   "name": "ideaspeak-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "smoke": "bun scripts/smoke-e2e.mjs",
     "smoke:full": "bun scripts/smoke-e2e.mjs --build",
-    "smoke:local": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs"
+    "smoke:local": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.20.0",

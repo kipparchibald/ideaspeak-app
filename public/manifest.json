@@ -1,7 +1,7 @@
 {
   "name": "IdeaSpeak",
   "short_name": "IdeaSpeak",
-  "description": "Voice-first xAI app builder. Speak ideas, get production-grade apps.",
+  "description": "IdeaSpeak v1.0 — Voice-first xAI app builder. Speak ideas, get production-grade apps.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0f",
