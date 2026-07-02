@@ -1,6 +1,21 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Mic, MicOff, Brain, Sparkles, MessageCircle, Settings } from 'lucide-react'
+import { Mic, MicOff, Brain, Sparkles, MessageCircle, Settings, FolderOpen, Trash2, Copy, Pencil } from 'lucide-react'
+import {
+  captureWorkspace,
+  listWorkspaces,
+  getWorkspace,
+  upsertWorkspace,
+  deleteWorkspace,
+  duplicateWorkspace,
+  renameWorkspace,
+  getLastSession,
+  setActiveWorkspaceId,
+  getActiveWorkspaceId,
+  formatRelativeTime,
+  STATUS_LABELS,
+  type SavedWorkspace,
+} from './lib/projects'
 import { AnimatePresence } from 'framer-motion'
 import { SandpackProvider, SandpackLayout, SandpackPreview, SandpackCodeEditor, SandpackFileExplorer } from '@codesandbox/sandpack-react'
 import { amethyst } from '@codesandbox/sandpack-themes'
@@ -105,6 +120,9 @@ interface AppState {
   buildPlan: BuildScaffoldPlan | null
   showPrompts: boolean
   showSettings: boolean
+  showProjects: boolean
+  activeWorkspaceId: string | null
+  projectCatalog: SavedWorkspace[]
   xaiApiKey: string
   githubToken: string
   mode: 'discuss' | 'build'
@@ -123,6 +141,14 @@ interface AppState {
   exportToGitHub: () => Promise<void>
   setShowPrompts: (show: boolean) => void
   setShowSettings: (show: boolean) => void
+  setShowProjects: (show: boolean) => void
+  refreshProjectCatalog: () => void
+  persistWorkspace: (silent?: boolean) => void
+  loadWorkspaceById: (id: string) => void
+  deleteWorkspaceById: (id: string) => void
+  duplicateWorkspaceById: (id: string) => void
+  renameWorkspaceById: (id: string, name: string) => void
+  restoreLastSession: (silent?: boolean) => boolean
   updateXaiKey: (key: string) => void
   updateGithubToken: (token: string) => void
   setMode: (mode: 'discuss' | 'build') => void
@@ -184,6 +210,9 @@ const useAppStore = create<AppState>((set, get) => ({
   buildPlan: null,
   showPrompts: false,
   showSettings: false,
+  showProjects: false,
+  activeWorkspaceId: typeof localStorage !== 'undefined' ? getActiveWorkspaceId() : null,
+  projectCatalog: typeof localStorage !== 'undefined' ? listWorkspaces() : [],
   xaiApiKey: localStorage.getItem('ideaspeak_xai_key') || '',
   githubToken: localStorage.getItem('ideaspeak_github_token') || '',
   mode: 'discuss',
@@ -363,6 +392,7 @@ const useAppStore = create<AppState>((set, get) => ({
     useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(updatedProject) })
     
     get().notifyBuildComplete(name, usedRealRefine)
+    get().persistWorkspace(true)
     toast.success(usedRealRefine ? 'Real xAI update applied' : 'Update applied')
   },
 
@@ -710,6 +740,99 @@ jobs:
 
   setShowPrompts: (show) => set({ showPrompts: show }),
   setShowSettings: (show) => set({ showSettings: show }),
+  setShowProjects: (show) => {
+    if (show) set({ projectCatalog: listWorkspaces() })
+    set({ showProjects: show })
+  },
+
+  refreshProjectCatalog: () => set({ projectCatalog: listWorkspaces() }),
+
+  persistWorkspace: (silent = false) => {
+    const state = get()
+    if (state.conversation.length === 0 && !state.currentProject && !state.buildPlan) return
+    const ws = captureWorkspace({
+      activeWorkspaceId: state.activeWorkspaceId,
+      conversation: state.conversation,
+      transcript: state.transcript,
+      buildPlan: state.buildPlan,
+      currentProject: state.currentProject,
+      mode: state.mode,
+      selectedPersonality: state.selectedPersonality,
+      proactiveSuggestions: state.proactiveSuggestions,
+    })
+    upsertWorkspace(ws)
+    set({ activeWorkspaceId: ws.id, projectCatalog: listWorkspaces() })
+    if (!silent) toast.success(`Saved "${ws.name}"`)
+  },
+
+  loadWorkspaceById: (id) => {
+    const ws = getWorkspace(id)
+    if (!ws) {
+      toast.error('Project not found')
+      return
+    }
+    setActiveWorkspaceId(ws.id)
+    set({
+      activeWorkspaceId: ws.id,
+      conversation: ws.conversation,
+      transcript: ws.transcript,
+      buildPlan: ws.buildPlan,
+      currentProject: ws.currentProject,
+      mode: ws.mode,
+      selectedPersonality: ws.selectedPersonality,
+      proactiveSuggestions: ws.proactiveSuggestions,
+      showProjects: false,
+      isBuilding: false,
+      isPlanning: false,
+      isDiscussing: false,
+      projectCatalog: listWorkspaces(),
+    })
+    toast.success(`Resumed "${ws.name}"`)
+  },
+
+  deleteWorkspaceById: (id) => {
+    deleteWorkspace(id)
+    const { activeWorkspaceId } = get()
+    if (activeWorkspaceId === id) {
+      setActiveWorkspaceId(null)
+      set({ activeWorkspaceId: null })
+    }
+    set({ projectCatalog: listWorkspaces() })
+    toast.success('Project deleted')
+  },
+
+  duplicateWorkspaceById: (id) => {
+    const copy = duplicateWorkspace(id)
+    if (!copy) return
+    set({ projectCatalog: listWorkspaces() })
+    toast.success(`Duplicated as "${copy.name}"`)
+  },
+
+  renameWorkspaceById: (id, name) => {
+    const ws = renameWorkspace(id, name)
+    if (!ws) return
+    set({ projectCatalog: listWorkspaces() })
+    toast.success('Project renamed')
+  },
+
+  restoreLastSession: (silent = false) => {
+    const ws = getLastSession()
+    if (!ws) return false
+    setActiveWorkspaceId(ws.id)
+    set({
+      activeWorkspaceId: ws.id,
+      conversation: ws.conversation,
+      transcript: ws.transcript,
+      buildPlan: ws.buildPlan,
+      currentProject: ws.currentProject,
+      mode: ws.mode,
+      selectedPersonality: ws.selectedPersonality,
+      proactiveSuggestions: ws.proactiveSuggestions,
+      projectCatalog: listWorkspaces(),
+    })
+    if (!silent) toast.success(`Resumed "${ws.name}"`)
+    return true
+  },
   
   updateXaiKey: (key) => {
     if (import.meta.env.PROD) {
@@ -803,6 +926,7 @@ jobs:
       toast.dismiss(pendingToast)
     } finally {
       set({ isDiscussing: false })
+      get().persistWorkspace(true)
     }
   },
 
@@ -833,6 +957,7 @@ jobs:
         plan = buildSimulatorPlan(realMessages)
       }
       set({ buildPlan: plan, isPlanning: false })
+      get().persistWorkspace(true)
       toast.success(`${plan.name} — plan ready. Review agents, then Approve & Build.`, { id: pending })
     } catch (e) {
       set({ isPlanning: false })
@@ -879,6 +1004,7 @@ jobs:
 
       useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(project) })
       get().notifyBuildComplete(result?.name || project.name, true)
+      get().persistWorkspace(true)
       toast.success('Scaffold plan executed — preview in Build mode!')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Build failed'
@@ -901,6 +1027,7 @@ jobs:
       set({ currentProject: project, isBuilding: false, buildPlan: { ...buildPlan, status: 'built' } })
       useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(project) })
       get().notifyBuildComplete(name, false)
+      get().persistWorkspace(true)
       toast('Build unavailable — using simulator scaffold')
     }
   },
@@ -916,7 +1043,7 @@ jobs:
   },
 
   reset: () => {
-    // @ts-ignore - store setter
+    setActiveWorkspaceId(null)
     useAppStore.setState({ proactiveSuggestions: [] })
     set({
       transcript: '',
@@ -925,19 +1052,14 @@ jobs:
       isBuilding: false,
       isPlanning: false,
       buildPlan: null,
-      mode: 'discuss'
+      activeWorkspaceId: null,
+      mode: 'discuss',
     })
+    toast.info('New idea started — previous work stays in Projects')
   },
 
-  // Phase 2 persist stub: basic localStorage for projects (full would use Convex/Supabase for accounts + sharing)
   saveProject: () => {
-    const { currentProject } = get()
-    if (currentProject) {
-      const saved = JSON.parse(localStorage.getItem('ideaspeak_projects') || '[]')
-      saved.push({ ...currentProject, savedAt: new Date().toISOString() })
-      localStorage.setItem('ideaspeak_projects', JSON.stringify(saved.slice(-10))) // keep last 10
-      toast.success('Project saved locally (Phase 2: cloud persistence + sharing coming)')
-    }
+    get().persistWorkspace(false)
   },
 
   // Simple undo for last refinement (great UX improvement over peers)
@@ -966,13 +1088,31 @@ jobs:
   setSelectedVoice: (v: string | null) => set({ selectedVoice: v }),
 
   loadProject: (project: any) => {
-    if (project && !project.id) project.id = Date.now().toString(36);
-    set({ 
-      currentProject: project as CurrentProject, 
-      conversation: [], 
-      transcript: '', 
-      mode: 'build' 
-    });
+    if (typeof project === 'string') {
+      get().loadWorkspaceById(project)
+      return
+    }
+    if (project?.conversation) {
+      get().loadWorkspaceById(project.id)
+      return
+    }
+    const ws: SavedWorkspace = {
+      id: project?.id || `ws-${Date.now().toString(36)}`,
+      name: project?.name || 'Imported Project',
+      summary: project?.brief?.vision || '',
+      status: 'built',
+      mode: 'build',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      conversation: [],
+      transcript: project?.transcript || '',
+      buildPlan: null,
+      currentProject: project as CurrentProject,
+      selectedPersonality: get().selectedPersonality,
+      proactiveSuggestions: [],
+    }
+    upsertWorkspace(ws)
+    get().loadWorkspaceById(ws.id)
   },
 
   updateCurrentProjectFiles: (files: any) => {
@@ -2012,21 +2152,61 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 export default function IdeaSpeak() {
   const {
     isRecording, transcript, conversation, currentProject, isBuilding, isDiscussing, isPlanning, buildPlan,
-    showPrompts, showSettings, xaiApiKey, githubToken, mode,
+    showPrompts, showSettings, showProjects, activeWorkspaceId, projectCatalog,
+    xaiApiKey, githubToken, mode,
     setTranscript, buildFromTranscript, sendRefinement,
-    exportProject, exportToGitHub, setShowPrompts, setShowSettings, updateXaiKey, updateGithubToken, 
+    exportProject, exportToGitHub, setShowPrompts, setShowSettings, setShowProjects, updateXaiKey, updateGithubToken, 
     setMode, sendDiscussMessage, generateBuildPlan, approvePlanAndBuild, clearBuildPlan,
     finalizeAndBuild, reset, saveProject, undoLastRefinement,
     proactiveSuggestions, fileHistory, promptQueue,
     setPromptQueue,
     loadProject, updateCurrentProjectFiles,
+    persistWorkspace, loadWorkspaceById, deleteWorkspaceById, duplicateWorkspaceById, renameWorkspaceById, restoreLastSession,
     selectedPersonality, selectedVoice, grokLive, grokSource,
     setSelectedPersonality, setSelectedVoice, refreshGrokStatus
   } = useAppStore()
 
+  const [projectSearch, setProjectSearch] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const sessionRestored = useRef(false)
+
   useEffect(() => {
     refreshGrokStatus()
   }, [refreshGrokStatus])
+
+  // Resume last session on first load
+  useEffect(() => {
+    if (sessionRestored.current) return
+    sessionRestored.current = true
+    useAppStore.setState({ projectCatalog: listWorkspaces() })
+    const resumed = restoreLastSession(true)
+    if (resumed) {
+      const ws = getLastSession()
+      if (ws) toast.info(`Resumed "${ws.name}" — pick up where you left off`)
+    }
+  }, [restoreLastSession])
+
+  // Auto-save workspace periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (conversation.length > 0 || currentProject || buildPlan) {
+        persistWorkspace(true)
+      }
+    }, 30000)
+    const onUnload = () => persistWorkspace(true)
+    window.addEventListener('beforeunload', onUnload)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('beforeunload', onUnload)
+    }
+  }, [conversation, currentProject, buildPlan, persistWorkspace])
+
+  const filteredProjects = projectCatalog.filter((p) => {
+    const q = projectSearch.toLowerCase()
+    if (!q) return true
+    return p.name.toLowerCase().includes(q) || p.summary.toLowerCase().includes(q)
+  })
 
   const [refinementText, setRefinementText] = useState('')
   const [modalXaiKey, setModalXaiKey] = useState('')
@@ -3370,6 +3550,11 @@ export default function IdeaSpeak() {
               </div>
               <span className="font-display text-2xl tracking-tighter font-semibold">IdeaSpeak</span>
             </div>
+            {activeWorkspaceId && projectCatalog.find((p) => p.id === activeWorkspaceId)?.name && (
+              <span className="text-[10px] text-[#666] max-w-[140px] truncate hidden lg:inline" title={projectCatalog.find((p) => p.id === activeWorkspaceId)?.name}>
+                · {projectCatalog.find((p) => p.id === activeWorkspaceId)?.name}
+              </span>
+            )}
             <div className={`text-[10px] px-2.5 py-px rounded-full border font-medium tracking-widest ${grokLive ? 'border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/10' : 'border-[#1f1f27] text-[#888]'}`}>
               {grokLive ? `LIVE GROK${grokSource === 'server' ? ' · server' : ''}` : 'SIMULATOR'}
             </div>
@@ -3391,34 +3576,30 @@ export default function IdeaSpeak() {
           </div>
 
           <div className="flex items-center gap-x-3 text-sm">
+            <button
+              type="button"
+              onClick={() => setShowProjects(true)}
+              className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#00ff88]/40"
+            >
+              <FolderOpen size={16} />
+              Projects
+              {projectCatalog.length > 0 && (
+                <span className="text-[10px] px-1.5 py-px rounded-full bg-[#00ff88]/20 text-[#00ff88]">{projectCatalog.length}</span>
+              )}
+            </button>
             <button type="button" onClick={() => setShowPrompts(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
-              <Brain size={16} /> View Prompts
+              <Brain size={16} /> Prompts
             </button>
             <button type="button" onClick={() => setShowSettings(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
               <Settings size={16} /> Settings
             </button>
-            {currentProject && (
-              <>
-                <button onClick={saveProject} className="px-4 py-2 text-sm border border-[#1f1f27] rounded-2xl">Save Project (local)</button>
-                <button onClick={reset} className="px-4 py-2 text-sm border border-[#1f1f27] rounded-2xl">New Idea</button>
-              </>
+            {(conversation.length > 0 || currentProject || buildPlan) && (
+              <button type="button" onClick={() => persistWorkspace(false)} className="px-4 py-2 text-sm border border-[#1f1f27] rounded-2xl hover:border-[#00ff88]/40">
+                Save
+              </button>
             )}
-            <button 
-              onClick={() => {
-                const saved = JSON.parse(localStorage.getItem('ideaspeak_projects') || '[]')
-                if (saved.length === 0) {
-                  toast.info('No saved projects yet')
-                  return
-                }
-                // Load the most recent
-                const latest = saved[saved.length - 1]
-                loadProject(latest)
-                useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(latest) })
-                toast.success('Loaded most recent saved project')
-              }}
-              className="px-4 py-2 text-sm border border-[#1f1f27] rounded-2xl"
-            >
-              Load Saved
+            <button type="button" onClick={reset} className="px-4 py-2 text-sm border border-[#1f1f27] rounded-2xl">
+              New Idea
             </button>
           </div>
         </div>
@@ -3462,6 +3643,145 @@ export default function IdeaSpeak() {
                 <div className="font-mono text-[#00ff88] mb-2 text-[10px] tracking-widest">MAIN BUILD AGENT</div>
                 <pre className="whitespace-pre-wrap bg-[#111116] p-5 rounded-2xl border border-[#1f1f27]">You are IdeaSpeak, the premier voice-to-production app builder powered by xAI. Turn spoken ideas into stunning production-grade apps. Voice-native. World-class taste. Design system is sacred. Production obsessed from v1. Proactive. Use the full prompt in prompts/ folder.</pre>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showProjects && createPortal(
+        <div className="modal-overlay bg-black/90" onClick={() => setShowProjects(false)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="glass border border-[#1f1f27] rounded-3xl w-full max-w-2xl max-h-[min(90vh,calc(100vh-3rem))] overflow-hidden flex flex-col my-auto"
+          >
+            <div className="p-6 border-b border-[#1f1f27] flex justify-between items-center shrink-0">
+              <div>
+                <div className="font-semibold text-xl">Project Suite</div>
+                <div className="text-xs text-[#666] mt-1">Saved locally — resume discuss, plan, or build anytime</div>
+              </div>
+              <button type="button" onClick={() => setShowProjects(false)} className="text-[#666] hover:text-[#e8e8f0]">Close</button>
+            </div>
+            <div className="p-4 border-b border-[#1f1f27] shrink-0">
+              <input
+                type="search"
+                value={projectSearch}
+                onChange={(e) => setProjectSearch(e.target.value)}
+                placeholder="Search projects…"
+                className="w-full bg-black border border-[#1f1f27] rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#00ff88]/50"
+              />
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 space-y-3">
+              {filteredProjects.length === 0 ? (
+                <div className="text-center py-12 text-[#666] text-sm">
+                  {projectCatalog.length === 0
+                    ? 'No saved projects yet. Discuss an idea — it auto-saves as you go.'
+                    : 'No projects match your search.'}
+                </div>
+              ) : (
+                filteredProjects.map((proj) => (
+                  <div
+                    key={proj.id}
+                    className={`p-4 rounded-2xl border transition ${
+                      proj.id === activeWorkspaceId
+                        ? 'border-[#00ff88]/50 bg-[#00ff88]/5'
+                        : 'border-[#1f1f27] bg-[#111116] hover:border-[#2a2a3a]'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        {renamingId === proj.id ? (
+                          <div className="flex gap-2">
+                            <input
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              className="flex-1 bg-black border border-[#1f1f27] rounded-xl px-3 py-1 text-sm"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => { renameWorkspaceById(proj.id, renameValue); setRenamingId(null) }}
+                              className="text-xs px-2 py-1 bg-[#00ff88] text-black rounded-lg"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="font-semibold truncate">{proj.name}</div>
+                        )}
+                        <div className="text-xs text-[#888] mt-1 line-clamp-2">{proj.summary}</div>
+                        <div className="flex flex-wrap gap-2 mt-2 text-[10px]">
+                          <span className={`px-2 py-0.5 rounded-full border ${
+                            proj.status === 'built' ? 'border-[#00ff88]/40 text-[#00ff88]' :
+                            proj.status === 'planned' ? 'border-amber-400/40 text-amber-300' :
+                            'border-[#1f1f27] text-[#888]'
+                          }`}>
+                            {STATUS_LABELS[proj.status]}
+                          </span>
+                          <span className="text-[#555]">{proj.conversation.length} messages</span>
+                          <span className="text-[#555]">{formatRelativeTime(proj.updatedAt)}</span>
+                          {proj.id === activeWorkspaceId && (
+                            <span className="text-[#00ff88]">· active</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => loadWorkspaceById(proj.id)}
+                          className="px-3 py-1.5 bg-[#00ff88] text-[#0a0a0f] rounded-xl text-xs font-semibold"
+                        >
+                          Resume
+                        </button>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            title="Rename"
+                            onClick={() => { setRenamingId(proj.id); setRenameValue(proj.name) }}
+                            className="p-1.5 border border-[#1f1f27] rounded-lg hover:bg-white/5"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Duplicate"
+                            onClick={() => duplicateWorkspaceById(proj.id)}
+                            className="p-1.5 border border-[#1f1f27] rounded-lg hover:bg-white/5"
+                          >
+                            <Copy size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete"
+                            onClick={() => {
+                              if (confirm(`Delete "${proj.name}"?`)) deleteWorkspaceById(proj.id)
+                            }}
+                            className="p-1.5 border border-[#1f1f27] rounded-lg hover:bg-red-500/10 text-red-400"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="p-4 border-t border-[#1f1f27] shrink-0 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { persistWorkspace(false); setShowProjects(false) }}
+                className="flex-1 py-2.5 bg-[#00ff88] text-[#0a0a0f] rounded-2xl text-sm font-semibold"
+              >
+                Save current work
+              </button>
+              <button
+                type="button"
+                onClick={() => { reset(); setShowProjects(false) }}
+                className="px-4 py-2.5 border border-[#1f1f27] rounded-2xl text-sm"
+              >
+                New idea
+              </button>
             </div>
           </div>
         </div>,
