@@ -30,6 +30,70 @@ interface CurrentProject {
   transcript: string
 }
 
+interface PlanAgent {
+  id: string
+  name: string
+  emoji: string
+  contribution: string
+}
+
+interface BuildScaffoldPlan {
+  id: string
+  status: 'draft' | 'ready' | 'building' | 'built'
+  name: string
+  oneLiner: string
+  vision: string
+  targetUser: string
+  coreLoop: string
+  wowMoment: string
+  v1Features: string[]
+  v2Deferred: string[]
+  techStack: string[]
+  risks: string[]
+  buildOrder: string[]
+  agents: PlanAgent[]
+  fileScaffold: { path: string; purpose: string }[]
+  brief: Record<string, unknown>
+  optimizedPrompt: string
+  createdAt: string
+}
+
+function buildSimulatorPlan(conversation: ConversationMessage[]): BuildScaffoldPlan {
+  const text = conversation.map((m) => m.content).join(' ')
+  const vision = text.slice(0, 200) || 'Voice-native app'
+  return {
+    id: `plan-sim-${Date.now()}`,
+    status: 'ready',
+    name: 'IdeaSpeak App',
+    oneLiner: vision.slice(0, 80),
+    vision,
+    targetUser: 'Early adopters who want a polished v1 fast',
+    coreLoop: 'Capture idea → see structured output → iterate',
+    wowMoment: 'Premium dark UI that feels like a real product team built it',
+    v1Features: ['Core screen with main loop', 'Design tokens + motion', 'Empty/loading states'],
+    v2Deferred: ['Auth', 'Payments', 'Team features'],
+    techStack: ['React 19', 'TypeScript', 'Tailwind v4'],
+    risks: ['Scope creep — keep v1 tight'],
+    buildOrder: ['Design tokens', 'Hero screen', 'Core loop wiring', 'Polish states'],
+    agents: [
+      { id: 'architect', name: 'Architect', emoji: '🏗️', contribution: 'Single-page vertical slice with clear data flow.' },
+      { id: 'ux', name: 'UX Lead', emoji: '🎨', contribution: 'Dark premium UI, Linear/Stripe taste, one screenshot-worthy screen.' },
+      { id: 'engineer', name: 'Engineer', emoji: '⚙️', contribution: 'React + TS + Tailwind scaffold, 5 files, Sandpack-ready.' },
+      { id: 'scope', name: 'Scope Advisor', emoji: '🎯', contribution: 'Ship core loop only; defer auth and integrations.' },
+    ],
+    fileScaffold: [
+      { path: 'src/App.tsx', purpose: 'Main UI + core loop' },
+      { path: 'src/index.css', purpose: 'Design tokens' },
+      { path: 'src/main.tsx', purpose: 'Entry' },
+      { path: 'src/components/ui/Button.tsx', purpose: 'UI primitive' },
+      { path: 'README.md', purpose: 'Setup docs' },
+    ],
+    brief: { vision, users: 'Target users from conversation', keyFeatures: ['Core loop'], tech: 'React + Tailwind' },
+    optimizedPrompt: `Build a production-grade v1: ${vision}`,
+    createdAt: new Date().toISOString(),
+  }
+}
+
 interface AppState {
   isRecording: boolean
   transcript: string
@@ -37,6 +101,8 @@ interface AppState {
   currentProject: CurrentProject | null
   isBuilding: boolean
   isDiscussing: boolean
+  isPlanning: boolean
+  buildPlan: BuildScaffoldPlan | null
   showPrompts: boolean
   showSettings: boolean
   xaiApiKey: string
@@ -61,6 +127,9 @@ interface AppState {
   updateGithubToken: (token: string) => void
   setMode: (mode: 'discuss' | 'build') => void
   sendDiscussMessage: (text: string, image?: string | null, voiceMode?: boolean) => Promise<void>
+  generateBuildPlan: () => Promise<void>
+  approvePlanAndBuild: () => Promise<void>
+  clearBuildPlan: () => void
   finalizeAndBuild: () => Promise<void>
   reset: () => void
   saveProject: () => void
@@ -111,6 +180,8 @@ const useAppStore = create<AppState>((set, get) => ({
   currentProject: null,
   isBuilding: false,
   isDiscussing: false,
+  isPlanning: false,
+  buildPlan: null,
   showPrompts: false,
   showSettings: false,
   xaiApiKey: localStorage.getItem('ideaspeak_xai_key') || '',
@@ -735,7 +806,7 @@ jobs:
     }
   },
 
-  finalizeAndBuild: async () => {
+  generateBuildPlan: async () => {
     const { conversation, xaiApiKey, selectedPersonality, grokLive } = get()
     const realMessages = conversation.filter(m => !String(m.id).startsWith('voice-opener'))
     const userTurns = realMessages.filter(m => m.role === 'user').length
@@ -744,57 +815,104 @@ jobs:
       return
     }
 
-    set({ isBuilding: true, mode: 'build' })
-    toast.info(grokLive ? 'Grok is building your app — usually 30–60 seconds…' : 'Generating scaffold…', { duration: 5000 })
+    set({ isPlanning: true, buildPlan: null })
+    const pending = toast.loading('Multi-agent team is drafting the scaffold plan…')
 
-    const planText = realMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')
+    const history = realMessages.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+
+    try {
+      let plan: BuildScaffoldPlan
+      if (grokLive) {
+        const { generateBuildPlan: fetchPlan } = await import('./lib/xai')
+        plan = await fetchPlan(history, selectedPersonality, xaiApiKey || undefined)
+      } else {
+        await new Promise((r) => setTimeout(r, 1200))
+        plan = buildSimulatorPlan(realMessages)
+      }
+      set({ buildPlan: plan, isPlanning: false })
+      toast.success(`${plan.name} — plan ready. Review agents, then Approve & Build.`, { id: pending })
+    } catch (e) {
+      set({ isPlanning: false })
+      const msg = e instanceof Error ? e.message : 'Plan generation failed'
+      toast.error(`Plan failed: ${msg}`, { id: pending })
+    }
+  },
+
+  approvePlanAndBuild: async () => {
+    const { buildPlan, xaiApiKey, selectedPersonality, grokLive, conversation } = get()
+    if (!buildPlan) {
+      toast.error('Generate a multi-agent plan first')
+      return
+    }
+
+    set({ isBuilding: true, mode: 'build', buildPlan: { ...buildPlan, status: 'building' } })
+    toast.info(grokLive ? 'Builder agent executing scaffold plan — 30–60 seconds…' : 'Generating scaffold…', { duration: 5000 })
+
+    const planText = buildPlan.optimizedPrompt
 
     try {
       const { generateWithLLM } = await import('./lib/xai')
-      const result = await generateWithLLM(planText, null as any, xaiApiKey || undefined, selectedPersonality)
-      // generateWithLLM throws on failure — caught below
+      const result = await generateWithLLM(
+        planText,
+        buildPlan.brief as Record<string, unknown>,
+        xaiApiKey || undefined,
+        selectedPersonality
+      )
 
       const project: CurrentProject = {
         id: Date.now().toString(36),
-        name: result.name,
-        brief: { vision: planText.slice(0, 220) },
+        name: result.name || buildPlan.name,
+        brief: buildPlan.brief,
         optimizedPrompt: planText,
         files: result.files,
-        transcript: planText.slice(0, 350)
+        transcript: conversation.map(m => m.content).join(' ').slice(0, 350),
       }
 
       set({
         currentProject: project,
-        isBuilding: false
+        isBuilding: false,
+        buildPlan: { ...buildPlan, status: 'built' },
       })
 
       useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(project) })
       get().notifyBuildComplete(result?.name || project.name, true)
-      toast.success('Plan handed to the builder!')
+      toast.success('Scaffold plan executed — preview in Build mode!')
     } catch (e) {
-      const { grokLive } = get()
       const msg = e instanceof Error ? e.message : 'Build failed'
       if (grokLive) {
-        set({ isBuilding: false })
+        set({ isBuilding: false, buildPlan: { ...buildPlan, status: 'ready' } })
         toast.error(`Grok build failed: ${msg}`)
         return
       }
-      const basicBrief = { vision: planText.slice(0, 180), keyFeatures: ['Core from plan'] }
+      const basicBrief = buildPlan.brief || { vision: planText.slice(0, 180), keyFeatures: buildPlan.v1Features }
       // @ts-ignore - function defined later
       const { files, name } = generateNativeProject(basicBrief, selectedPersonality)
       const project: CurrentProject = {
         id: Date.now().toString(36),
-        name,
-        brief: { vision: planText.slice(0, 200) },
+        name: name || buildPlan.name,
+        brief: basicBrief,
         optimizedPrompt: planText,
         files,
-        transcript: planText
+        transcript: planText.slice(0, 350),
       }
-      set({ currentProject: project, isBuilding: false })
+      set({ currentProject: project, isBuilding: false, buildPlan: { ...buildPlan, status: 'built' } })
       useAppStore.setState({ proactiveSuggestions: generateProactiveSuggestions(project) })
       get().notifyBuildComplete(name, false)
       toast('Build unavailable — using simulator scaffold')
     }
+  },
+
+  clearBuildPlan: () => set({ buildPlan: null }),
+
+  finalizeAndBuild: async () => {
+    const { buildPlan } = get()
+    if (buildPlan?.status === 'ready') {
+      return get().approvePlanAndBuild()
+    }
+    await get().generateBuildPlan()
   },
 
   reset: () => {
@@ -805,6 +923,8 @@ jobs:
       conversation: [],
       currentProject: null,
       isBuilding: false,
+      isPlanning: false,
+      buildPlan: null,
       mode: 'discuss'
     })
   },
@@ -1891,11 +2011,12 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 
 export default function IdeaSpeak() {
   const {
-    isRecording, transcript, conversation, currentProject, isBuilding, isDiscussing,
+    isRecording, transcript, conversation, currentProject, isBuilding, isDiscussing, isPlanning, buildPlan,
     showPrompts, showSettings, xaiApiKey, githubToken, mode,
     setTranscript, buildFromTranscript, sendRefinement,
     exportProject, exportToGitHub, setShowPrompts, setShowSettings, updateXaiKey, updateGithubToken, 
-    setMode, sendDiscussMessage, finalizeAndBuild, reset, saveProject, undoLastRefinement,
+    setMode, sendDiscussMessage, generateBuildPlan, approvePlanAndBuild, clearBuildPlan,
+    finalizeAndBuild, reset, saveProject, undoLastRefinement,
     proactiveSuggestions, fileHistory, promptQueue,
     setPromptQueue,
     loadProject, updateCurrentProjectFiles,
@@ -2721,7 +2842,7 @@ export default function IdeaSpeak() {
           <span className="ml-1">{personalities.find(p => p.id === selectedPersonality)?.emoji}</span>
         </div>
         <h1 className="font-display text-5xl tracking-tighter font-semibold">Speak your idea. Ship a real app.</h1>
-        <p className="mt-2 text-xl text-[#888] max-w-2xl mx-auto">Voice conversation with Grok to scope a buildable v1 — then generate, preview, refine, and export a production-grade project.</p>
+        <p className="mt-2 text-xl text-[#888] max-w-2xl mx-auto">Grok helps you scope v1 in conversation — then a multi-agent team (Architect, UX, Engineer, Scope) drafts a scaffold plan before any code is written.</p>
       </div>
 
       {/* Personality quick-switcher - fun tab-like selector for customization */}
@@ -2938,7 +3059,7 @@ export default function IdeaSpeak() {
           {conversation.length === 0 && !isDiscussing && (
             <div className="text-[#666] italic">
               {grokLive
-                ? 'Speak or type for a real Grok conversation. We vet the idea together, surface risks, sketch a plan, then build when it feels solid.'
+                ? 'Speak or type with Grok to shape the idea. Then Generate Multi-Agent Plan — four specialists scaffold v1 before the builder runs.'
                 : 'Speak or type to explore your idea. Add XAI_API_KEY on Vercel (or your key in Settings) for real Grok — otherwise this high-quality simulator still demos the flow.'}
             </div>
           )}
@@ -2949,15 +3070,111 @@ export default function IdeaSpeak() {
           )}
         </div>
 
+        {/* Multi-agent scaffold plan — review before build */}
+        {buildPlan && (
+          <div className="mt-6 pt-6 border-t border-[#1f1f27]">
+            <div className="text-xs uppercase tracking-widest text-[#00ff88] mb-3 font-medium flex items-center gap-2">
+              <Brain size={12} /> Multi-agent scaffold plan
+            </div>
+            <div className="bg-[#111116] border border-[#1f1f27] rounded-3xl p-5 space-y-4 text-sm">
+              <div>
+                <div className="font-semibold text-lg">{buildPlan.name}</div>
+                <div className="text-[#888] mt-1">{buildPlan.oneLiner}</div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-2xl bg-[#0a0a0f] border border-[#1f1f27]">
+                  <div className="text-[#00ff88] mb-1">Core loop</div>
+                  {buildPlan.coreLoop}
+                </div>
+                <div className="p-3 rounded-2xl bg-[#0a0a0f] border border-[#1f1f27]">
+                  <div className="text-[#00ff88] mb-1">Wow moment</div>
+                  {buildPlan.wowMoment}
+                </div>
+              </div>
+              <div className="space-y-2">
+                {buildPlan.agents.map((agent) => (
+                  <div key={agent.id} className="p-3 rounded-2xl border border-[#1f1f27] bg-[#0f0f14]">
+                    <div className="font-medium text-xs mb-1">{agent.emoji} {agent.name}</div>
+                    <div className="text-[#aaa] text-xs leading-relaxed">{agent.contribution}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="text-[#00ff88] mb-1">v1 ships</div>
+                  <ul className="list-disc list-inside text-[#aaa] space-y-0.5">
+                    {buildPlan.v1Features.map((f, i) => <li key={i}>{f}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-amber-300 mb-1">v2 deferred</div>
+                  <ul className="list-disc list-inside text-[#666] space-y-0.5">
+                    {buildPlan.v2Deferred.map((f, i) => <li key={i}>{f}</li>)}
+                  </ul>
+                </div>
+              </div>
+              <div>
+                <div className="text-[#00ff88] mb-2 text-xs">File scaffold</div>
+                <div className="space-y-1">
+                  {buildPlan.fileScaffold.map((f) => (
+                    <div key={f.path} className="flex gap-2 text-xs font-mono">
+                      <span className="text-[#00ff88] shrink-0">{f.path}</span>
+                      <span className="text-[#666] truncate">{f.purpose}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[#00ff88] mb-1 text-xs">Build order</div>
+                <ol className="list-decimal list-inside text-xs text-[#aaa] space-y-0.5">
+                  {buildPlan.buildOrder.map((step, i) => <li key={i}>{step}</li>)}
+                </ol>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearBuildPlan()
+                  sendDiscussMessage('Let\'s refine the plan — what should change before we build?')
+                }}
+                className="text-xs text-[#888] underline hover:text-[#e8e8f0]"
+              >
+                Refine plan in chat with Grok
+              </button>
+            </div>
+          </div>
+        )}
+
         {conversation.filter(m => !String(m.id).startsWith('voice-opener') && m.role === 'user').length >= 1 && (
           <div className="mt-6 pt-6 border-t border-[#1f1f27] space-y-3">
-            <button 
-              onClick={finalizeAndBuild}
-              disabled={isBuilding}
-              className="w-full py-4 rounded-3xl bg-white text-[#0a0a0f] font-semibold text-lg flex items-center justify-center gap-3 hover:bg-[#f0f0f0] disabled:opacity-50"
-            >
-              <Sparkles /> {grokLive ? 'Finalize Plan & Build with Grok' : 'Finalize Plan & Build (simulator)'}
-            </button>
+            {!buildPlan && (
+              <button 
+                type="button"
+                onClick={generateBuildPlan}
+                disabled={isBuilding || isPlanning}
+                className="w-full py-4 rounded-3xl bg-[#00ff88] text-[#0a0a0f] font-semibold text-lg flex items-center justify-center gap-3 hover:bg-[#00ff88]/90 disabled:opacity-50"
+              >
+                <Brain /> {isPlanning ? 'Agents planning…' : grokLive ? 'Generate Multi-Agent Plan' : 'Generate Plan (simulator)'}
+              </button>
+            )}
+            {buildPlan?.status === 'ready' && (
+              <button 
+                type="button"
+                onClick={approvePlanAndBuild}
+                disabled={isBuilding}
+                className="w-full py-4 rounded-3xl bg-white text-[#0a0a0f] font-semibold text-lg flex items-center justify-center gap-3 hover:bg-[#f0f0f0] disabled:opacity-50"
+              >
+                <Sparkles /> {grokLive ? 'Approve Plan & Build with Grok' : 'Approve Plan & Build (simulator)'}
+              </button>
+            )}
+            {buildPlan && (
+              <button
+                type="button"
+                onClick={clearBuildPlan}
+                className="w-full py-2 text-xs text-[#666] hover:text-[#e8e8f0]"
+              >
+                Discard plan &amp; regenerate
+              </button>
+            )}
             <button
               onClick={async () => {
                 const { buildLovablePrompt, sendToLovable } = await import('./lib/lovable')
@@ -2978,7 +3195,9 @@ export default function IdeaSpeak() {
               Build with Lovable (hosted API — works like lovable.dev)
             </button>
             <p className="text-center text-xs text-[#666]">
-              {grokLive ? 'Native Grok build above, or send optimized prompt to Lovable.' : 'No Grok key yet? Lovable button uses their working hosted API today.'}
+              {grokLive
+                ? 'Flow: discuss → multi-agent plan → approve → build. Or send to Lovable below.'
+                : 'Discuss → generate plan → approve build. Lovable works without a key.'}
             </p>
           </div>
         )}
@@ -3166,7 +3385,7 @@ export default function IdeaSpeak() {
                 onClick={() => setMode('build')}
                 className={`px-3 py-1 rounded-xl transition ${mode === 'build' ? 'bg-[#00ff88] text-[#0a0a0f] font-medium' : 'hover:bg-[#1a1a21]'}`}
               >
-                2. Build the App
+                2. Build &amp; Preview
               </button>
             </div>
           </div>

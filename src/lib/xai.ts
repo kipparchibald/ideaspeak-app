@@ -28,6 +28,39 @@ export type GrokStatus = {
   model?: string
 }
 
+export interface PlanAgent {
+  id: string
+  name: string
+  emoji: string
+  contribution: string
+}
+
+export interface FileScaffold {
+  path: string
+  purpose: string
+}
+
+export interface BuildScaffoldPlan {
+  id: string
+  status: 'draft' | 'ready' | 'building' | 'built'
+  name: string
+  oneLiner: string
+  vision: string
+  targetUser: string
+  coreLoop: string
+  wowMoment: string
+  v1Features: string[]
+  v2Deferred: string[]
+  techStack: string[]
+  risks: string[]
+  buildOrder: string[]
+  agents: PlanAgent[]
+  fileScaffold: FileScaffold[]
+  brief: Record<string, unknown>
+  optimizedPrompt: string
+  createdAt: string
+}
+
 let cachedStatus: GrokStatus | null = null
 
 export async function fetchGrokStatus(): Promise<GrokStatus> {
@@ -83,6 +116,24 @@ export function normalizeProjectFiles(
     }
   }
   return out
+}
+
+export async function generateBuildPlan(
+  conversation: XaiMessage[],
+  personality: string = 'grok',
+  apiKey?: string
+): Promise<BuildScaffoldPlan> {
+  const res = await fetch(apiUrl('/api/plan'), {
+    method: 'POST',
+    headers: apiHeaders(apiKey),
+    body: JSON.stringify({ conversation, personality }),
+    signal: AbortSignal.timeout(60000),
+  })
+
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || `Plan error ${res.status}`)
+  if (!data.plan) throw new Error('No plan returned from multi-agent orchestrator')
+  return data.plan as BuildScaffoldPlan
 }
 
 export async function runIdeaSpeakAgent(

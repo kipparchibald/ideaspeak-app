@@ -201,6 +201,43 @@ const server = serve({
       }
     }
 
+    // Multi-agent scaffold plan before build
+    if (url.pathname === '/api/plan' && req.method === 'POST') {
+      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers: cors });
+      try {
+        const { PLAN_SYSTEM } = await import('../api/plan-prompt.js');
+        const { conversation = [], personality = 'grok' } = await req.json();
+        const transcript = conversation
+          .filter((m: { role?: string; content?: string }) => m.role && m.content)
+          .map((m: { role: string; content: string }) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join('\n\n');
+        if (!transcript.trim()) {
+          return Response.json({ error: 'Conversation required' }, { status: 400, headers: cors });
+        }
+        const content = await callXaiProxy(
+          [
+            { role: 'system', content: PLAN_SYSTEM },
+            { role: 'user', content: `Conversation:\n\n${transcript}\n\nPersonality: ${personality}` },
+          ],
+          apiKey
+        );
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+        if (!parsed?.fileScaffold) {
+          return Response.json({ error: 'Invalid plan structure', content }, { status: 502, headers: cors });
+        }
+        return Response.json(
+          {
+            content,
+            plan: { ...parsed, id: `plan-${Date.now()}`, status: 'ready', createdAt: new Date().toISOString() },
+          },
+          { headers: cors }
+        );
+      } catch (e: any) {
+        return Response.json({ error: e.message }, { status: 500, headers: cors });
+      }
+    }
+
     // Full build endpoint: uses agent prompt, asks for structured files JSON
     if (url.pathname === '/api/build' && req.method === 'POST') {
       if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers: cors });
