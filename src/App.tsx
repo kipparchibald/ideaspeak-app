@@ -677,6 +677,7 @@ jobs:
     if (!text.trim() && !image) return
 
     set({ isDiscussing: true })
+    const pendingToast = toast.loading(voiceMode ? 'Grok is thinking…' : 'Sending to Grok…')
     const userContent = text.trim() || (image ? '[Image uploaded]' : '')
     const userMsg: ConversationMessage = {
       id: Date.now().toString(),
@@ -703,11 +704,12 @@ jobs:
       }
 
       set(state => ({ conversation: [...state.conversation, assistantMsg] }))
+      toast.success('Grok replied', { id: pendingToast })
     } catch (e) {
       const err = e instanceof Error ? e.message : 'Request failed'
       const { grokLive } = get()
       if (grokLive) {
-        toast.error(`Grok error: ${err}`)
+        toast.error(`Grok error: ${err}`, { id: pendingToast })
         const assistantMsg: ConversationMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -727,6 +729,7 @@ jobs:
         content: fallback,
       }
       set(state => ({ conversation: [...state.conversation, assistantMsg] }))
+      toast.dismiss(pendingToast)
     } finally {
       set({ isDiscussing: false })
     }
@@ -2371,7 +2374,16 @@ export default function IdeaSpeak() {
     }
   }
 
-  const startVoiceChat = () => {
+  const startVoiceChat = async () => {
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream.getTracks().forEach((t) => t.stop())
+      }
+    } catch {
+      toast.error('Microphone blocked — allow mic for ideaspeak-app.vercel.app, or type your message below')
+    }
+
     setVoiceChatActive(true)
     voiceChatActiveRef.current = true
     setVoiceStatus('listening')
@@ -2877,10 +2889,10 @@ export default function IdeaSpeak() {
           <div className="flex gap-3 mt-3">
             <button 
               onClick={() => { sendDiscussMessage(transcript, uploadedImage, voiceChatActiveRef.current || undefined); setTranscript(''); setUploadedImage(null); }} 
-              disabled={(!transcript.trim() && !uploadedImage) || isBuilding}
+              disabled={(!transcript.trim() && !uploadedImage) || isBuilding || isDiscussing}
               className="flex-1 py-3 rounded-2xl bg-[#00ff88] text-[#0a0a0f] font-semibold disabled:opacity-50"
             >
-              Send to Grok Agent
+              {isDiscussing ? 'Waiting for Grok…' : 'Send to Grok Agent'}
             </button>
             <button 
               onClick={() => queuePrompt(transcript)} 
@@ -2916,15 +2928,13 @@ export default function IdeaSpeak() {
           <MessageCircle size={18} className="text-[#00ff88]" /> Conversation with Grok
         </div>
         <div ref={conversationScrollRef} className="space-y-4 max-h-[420px] overflow-auto pr-2 text-sm">
-          <AnimatePresence>
             {conversation.map(msg => (
               <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : ''}>
-                <div className={`max-w-[85%] px-4 py-2.5 rounded-3xl ${msg.role === 'user' ? 'bg-[#00ff88] text-[#0a0a0f]' : 'bg-[#1a1a21]'}`}>
+                <div className={`max-w-[85%] px-4 py-2.5 rounded-3xl ${msg.role === 'user' ? 'bg-[#00ff88] text-[#0a0a0f]' : 'bg-[#1a1a21] text-[#e8e8f0]'}`}>
                   {msg.content}
                 </div>
               </div>
             ))}
-          </AnimatePresence>
           {conversation.length === 0 && !isDiscussing && (
             <div className="text-[#666] italic">
               {grokLive

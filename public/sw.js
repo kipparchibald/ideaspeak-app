@@ -1,6 +1,6 @@
 // IdeaSpeak Service Worker — network-first for HTML so deploys never serve stale shells
 
-const CACHE_NAME = 'ideaspeak-v2';
+const CACHE_NAME = 'ideaspeak-v4';
 const STATIC_CACHE = [
   '/manifest.json',
   '/favicon.svg',
@@ -41,23 +41,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Hashed build assets: network first, fall back to cache
-  if (request.url.includes('/assets/')) {
-    event.respondWith(
-      fetch(request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      }).catch(() => caches.match(request))
-    );
+  // Never cache JS/CSS bundles or API — stale assets caused blank/broken Grok UI
+  if (request.url.includes('/assets/') || request.url.includes('/api/')) {
+    event.respondWith(fetch(request));
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request))
-  );
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
 
 self.addEventListener('push', (event) => {
