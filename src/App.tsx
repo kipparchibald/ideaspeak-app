@@ -36,6 +36,7 @@ interface AppState {
   conversation: ConversationMessage[]
   currentProject: CurrentProject | null
   isBuilding: boolean
+  isDiscussing: boolean
   showPrompts: boolean
   showSettings: boolean
   xaiApiKey: string
@@ -109,6 +110,7 @@ const useAppStore = create<AppState>((set, get) => ({
   conversation: [],
   currentProject: null,
   isBuilding: false,
+  isDiscussing: false,
   showPrompts: false,
   showSettings: false,
   xaiApiKey: localStorage.getItem('ideaspeak_xai_key') || '',
@@ -674,6 +676,7 @@ jobs:
     const { xaiApiKey, selectedPersonality } = get()
     if (!text.trim() && !image) return
 
+    set({ isDiscussing: true })
     const userContent = text.trim() || (image ? '[Image uploaded]' : '')
     const userMsg: ConversationMessage = {
       id: Date.now().toString(),
@@ -724,6 +727,8 @@ jobs:
         content: fallback,
       }
       set(state => ({ conversation: [...state.conversation, assistantMsg] }))
+    } finally {
+      set({ isDiscussing: false })
     }
   },
 
@@ -1883,7 +1888,7 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 
 export default function IdeaSpeak() {
   const {
-    isRecording, transcript, conversation, currentProject, isBuilding,
+    isRecording, transcript, conversation, currentProject, isBuilding, isDiscussing,
     showPrompts, showSettings, xaiApiKey, githubToken, mode,
     setTranscript, buildFromTranscript, sendRefinement,
     exportProject, exportToGitHub, setShowPrompts, setShowSettings, updateXaiKey, updateGithubToken, 
@@ -1915,6 +1920,7 @@ export default function IdeaSpeak() {
   const voiceChatActiveRef = useRef(false)
   const voiceStatusRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null)
 
   // PWA + Notifications setup
   useEffect(() => {
@@ -2161,7 +2167,15 @@ export default function IdeaSpeak() {
       }
     }
     prevConvLength.current = conversation.length
+    conversationScrollRef.current?.scrollTo({
+      top: conversationScrollRef.current.scrollHeight,
+      behavior: 'smooth',
+    })
   }, [conversation])
+
+  const lastGrokReply = [...conversation]
+    .reverse()
+    .find((m) => m.role === 'assistant' && !String(m.id).startsWith('voice-opener'))
 
   const startVoice = () => {
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -2793,11 +2807,16 @@ export default function IdeaSpeak() {
                     <div className="italic text-[#e8e8f0]">{liveInterim}</div>
                   </div>
                 )}
-                {(voiceStatus === 'speaking' || voiceStatus === 'thinking') && conversation.length > 0 && conversation[conversation.length - 1]?.role === 'assistant' && (
+                {(isDiscussing || voiceStatus === 'thinking') && (
+                  <div className="px-4 py-2 bg-[#111116] border border-amber-400/30 rounded-2xl text-center text-xs text-amber-200">
+                    Grok is thinking… (usually 5–15 seconds)
+                  </div>
+                )}
+                {lastGrokReply && (
                   <div className="px-4 py-2 bg-[#1a1a21] border border-violet-400/30 rounded-2xl">
                     <div className="text-[10px] tracking-[1px] text-violet-400 mb-0.5">GROK</div>
                     <div className="text-[#e8e8f0]">
-                      {sanitizeForSpeech(conversation[conversation.length - 1].content, true).slice(0, 220)}
+                      {sanitizeForSpeech(lastGrokReply.content, true).slice(0, 280)}
                     </div>
                   </div>
                 )}
@@ -2896,7 +2915,7 @@ export default function IdeaSpeak() {
         <div className="font-semibold mb-4 flex items-center gap-2">
           <MessageCircle size={18} className="text-[#00ff88]" /> Conversation with Grok
         </div>
-        <div className="space-y-4 max-h-[420px] overflow-auto pr-2 text-sm">
+        <div ref={conversationScrollRef} className="space-y-4 max-h-[420px] overflow-auto pr-2 text-sm">
           <AnimatePresence>
             {conversation.map(msg => (
               <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : ''}>
@@ -2906,11 +2925,16 @@ export default function IdeaSpeak() {
               </div>
             ))}
           </AnimatePresence>
-          {conversation.length === 0 && (
+          {conversation.length === 0 && !isDiscussing && (
             <div className="text-[#666] italic">
               {grokLive
                 ? 'Speak or type for a real Grok conversation. We vet the idea together, surface risks, sketch a plan, then build when it feels solid.'
                 : 'Speak or type to explore your idea. Add XAI_API_KEY on Vercel (or your key in Settings) for real Grok — otherwise this high-quality simulator still demos the flow.'}
+            </div>
+          )}
+          {isDiscussing && (
+            <div className="text-amber-200/90 italic text-center py-4">
+              Waiting for Grok…
             </div>
           )}
         </div>

@@ -165,6 +165,7 @@ export async function discussWithGrok(
       method: 'POST',
       headers: apiHeaders(apiKey),
       body: JSON.stringify({ messages, image, personality, voiceMode }),
+      signal: AbortSignal.timeout(voiceMode ? 45000 : 60000),
     })
 
     const data = await res.json()
@@ -180,8 +181,11 @@ export async function discussWithGrok(
   } catch (e) {
     const live = getCachedGrokStatus()?.live
     if (live) {
-      console.warn('Discuss call failed while Grok live:', e)
-      throw e
+      const msg = e instanceof Error && e.name === 'TimeoutError'
+        ? 'Grok took too long — try again or type a shorter message'
+        : (e instanceof Error ? e.message : 'Request failed')
+      console.warn('Discuss call failed while Grok live:', msg)
+      throw new Error(msg)
     }
     console.warn('Discuss offline, using fallback:', e)
     return simulateDiscuss(messages, personality, voiceMode)
