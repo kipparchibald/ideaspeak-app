@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Mic, MicOff, Brain, Sparkles, MessageCircle, Settings } from 'lucide-react'
 import { AnimatePresence } from 'framer-motion'
 import { SandpackProvider, SandpackLayout, SandpackPreview, SandpackCodeEditor, SandpackFileExplorer } from '@codesandbox/sandpack-react'
@@ -680,7 +681,7 @@ jobs:
 
     try {
       const { discussWithGrok } = await import('./lib/xai')
-      const history = [...get().conversation, userMsg]
+      const history = get().conversation
         .filter(m => !String(m.id).startsWith('voice-opener'))
         .map(m => ({
           role: m.role as 'user' | 'assistant',
@@ -2063,7 +2064,10 @@ export default function IdeaSpeak() {
 
   // Voice-chat aware full speak that drives the listen → think → speak → listen loop
   const speakVoiceReply = (text: string) => {
-    const spoken = sanitizeForSpeech(text, true)
+    let spoken = sanitizeForSpeech(text, true)
+    if (!spoken.trim()) {
+      spoken = "I'm here — what should we build?"
+    }
     if (!voiceChatActiveRef.current) {
       speak(spoken)
       return
@@ -2124,7 +2128,14 @@ export default function IdeaSpeak() {
     }
 
     currentUtteranceRef.current = utterance
+    try { window.speechSynthesis.resume() } catch {}
     window.speechSynthesis.speak(utterance)
+    // Chrome/Safari sometimes drops the first utterance without a nudge
+    setTimeout(() => {
+      if (window.speechSynthesis.paused) {
+        try { window.speechSynthesis.resume() } catch {}
+      }
+    }, 120)
 
     // Start barge-in listener so the user can just start talking to interrupt (real conversational feel)
     setTimeout(() => {
@@ -2282,7 +2293,15 @@ export default function IdeaSpeak() {
         voiceStatusRef.current = 'thinking'
 
         // Send straight into the real conversation (voiceMode = true makes replies short & back-and-forth)
-        sendDiscussMessage(spoken, uploadedImage, true).catch(() => {})
+        sendDiscussMessage(spoken, uploadedImage, true).catch((err) => {
+          console.error('Voice discuss failed:', err)
+          toast.error('Grok did not respond — add your API key in Settings or type your message')
+          if (voiceChatActiveRef.current) {
+            setVoiceStatus('listening')
+            voiceStatusRef.current = 'listening'
+            startListeningForVoiceChat()
+          }
+        })
         setTranscript('')
         setUploadedImage(null)
 
@@ -2770,11 +2789,11 @@ export default function IdeaSpeak() {
                     <div className="italic text-[#e8e8f0]">{liveInterim}</div>
                   </div>
                 )}
-                {voiceStatus === 'speaking' && conversation.length > 0 && (
+                {(voiceStatus === 'speaking' || voiceStatus === 'thinking') && conversation.length > 0 && conversation[conversation.length - 1]?.role === 'assistant' && (
                   <div className="px-4 py-2 bg-[#1a1a21] border border-violet-400/30 rounded-2xl">
                     <div className="text-[10px] tracking-[1px] text-violet-400 mb-0.5">GROK</div>
                     <div className="text-[#e8e8f0]">
-                      {conversation[conversation.length-1]?.content.slice(0, 220)}{conversation[conversation.length-1]?.content.length > 220 ? '…' : ''}
+                      {sanitizeForSpeech(conversation[conversation.length - 1].content, true).slice(0, 220)}
                     </div>
                   </div>
                 )}
@@ -3115,10 +3134,10 @@ export default function IdeaSpeak() {
           </div>
 
           <div className="flex items-center gap-x-3 text-sm">
-            <button onClick={() => setShowPrompts(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
+            <button type="button" onClick={() => setShowPrompts(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
               <Brain size={16} /> View Prompts
             </button>
-            <button onClick={() => setShowSettings(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
+            <button type="button" onClick={() => setShowSettings(true)} className="flex items-center gap-x-2 px-4 py-2 rounded-2xl border border-[#1f1f27] hover:border-[#2a2a3a]">
               <Settings size={16} /> Settings
             </button>
             {currentProject && (
@@ -3148,14 +3167,15 @@ export default function IdeaSpeak() {
         </div>
       </nav>
 
-      {isBuilding && (
-        <div className="fixed inset-0 z-[200] bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
+      {isBuilding && createPortal(
+        <div className="modal-overlay z-[200] bg-black/75 backdrop-blur-sm items-center">
           <div className="text-center max-w-sm">
             <div className="w-12 h-12 mx-auto mb-4 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
             <p className="font-semibold text-lg">Building your app</p>
             <p className="text-sm text-[#888] mt-2">Grok is generating a polished vertical slice — usually 30–60 seconds.</p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <ErrorBoundary>
@@ -3168,35 +3188,36 @@ export default function IdeaSpeak() {
         IdeaSpeak v1.0 · Voice-first app builder · Powered by xAI Grok
       </footer>
 
-      {/* Modals */}
-      <AnimatePresence>
-        {showPrompts && (
-          <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-6" onClick={() => setShowPrompts(false)}>
-            <div onClick={e=>e.stopPropagation()} className="glass border border-[#1f1f27] rounded-3xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-[#1f1f27] flex justify-between items-center">
-                <div className="font-semibold text-xl">Exact xAI Prompts Powering This</div>
-                <button onClick={() => setShowPrompts(false)} className="text-[#666]">Close</button>
+      {/* Modals — portaled so fixed positioning isn't clipped by page layout */}
+      {showPrompts && createPortal(
+        <div className="modal-overlay bg-black/90" onClick={() => setShowPrompts(false)}>
+          <div onClick={e => e.stopPropagation()} className="glass border border-[#1f1f27] rounded-3xl w-full max-w-3xl max-h-[min(80vh,calc(100vh-3rem))] overflow-hidden flex flex-col my-auto">
+            <div className="p-6 border-b border-[#1f1f27] flex justify-between items-center">
+              <div className="font-semibold text-xl">Exact xAI Prompts Powering This</div>
+              <button type="button" onClick={() => setShowPrompts(false)} className="text-[#666]">Close</button>
+            </div>
+            <div className="p-6 overflow-auto text-xs leading-relaxed font-light text-[#aaa] space-y-8">
+              <div>
+                <div className="font-mono text-[#00ff88] mb-2 text-[10px] tracking-widest">VOICE REFINER</div>
+                <pre className="whitespace-pre-wrap bg-[#111116] p-5 rounded-2xl border border-[#1f1f27]">You are the IdeaSpeak Voice Intelligence layer. Correct & elevate the raw transcript. Infer job-to-be-done, users, hidden requirements. Be opinionated. Preserve speaker voice. Optimize for the build agent.</pre>
               </div>
-              <div className="p-6 overflow-auto text-xs leading-relaxed font-light text-[#aaa] space-y-8">
-                <div>
-                  <div className="font-mono text-[#00ff88] mb-2 text-[10px] tracking-widest">VOICE REFINER</div>
-                  <pre className="whitespace-pre-wrap bg-[#111116] p-5 rounded-2xl border border-[#1f1f27]">You are the IdeaSpeak Voice Intelligence layer. Correct & elevate the raw transcript. Infer job-to-be-done, users, hidden requirements. Be opinionated. Preserve speaker voice. Optimize for the build agent.</pre>
-                </div>
-                <div>
-                  <div className="font-mono text-[#00ff88] mb-2 text-[10px] tracking-widest">MAIN BUILD AGENT</div>
-                  <pre className="whitespace-pre-wrap bg-[#111116] p-5 rounded-2xl border border-[#1f1f27]">You are IdeaSpeak, the premier voice-to-production app builder powered by xAI. Turn spoken ideas into stunning production-grade apps. Voice-native. World-class taste. Design system is sacred. Production obsessed from v1. Proactive. Use the full prompt in prompts/ folder.</pre>
-                </div>
+              <div>
+                <div className="font-mono text-[#00ff88] mb-2 text-[10px] tracking-widest">MAIN BUILD AGENT</div>
+                <pre className="whitespace-pre-wrap bg-[#111116] p-5 rounded-2xl border border-[#1f1f27]">You are IdeaSpeak, the premier voice-to-production app builder powered by xAI. Turn spoken ideas into stunning production-grade apps. Voice-native. World-class taste. Design system is sacred. Production obsessed from v1. Proactive. Use the full prompt in prompts/ folder.</pre>
               </div>
             </div>
           </div>
-        )}
-      </AnimatePresence>
+        </div>,
+        document.body
+      )}
 
-      <AnimatePresence>
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-6" onClick={() => setShowSettings(false)}>
-            <div onClick={e=>e.stopPropagation()} className="glass border border-[#1f1f27] rounded-3xl w-full max-w-md p-8">
-              <div className="font-semibold mb-4">xAI & GitHub Settings</div>
+      {showSettings && createPortal(
+        <div className="modal-overlay bg-black/90" onClick={() => setShowSettings(false)}>
+          <div onClick={e => e.stopPropagation()} className="glass border border-[#1f1f27] rounded-3xl w-full max-w-md max-h-[min(90vh,calc(100vh-3rem))] overflow-y-auto p-8 my-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div className="font-semibold">xAI & GitHub Settings</div>
+              <button type="button" onClick={() => setShowSettings(false)} className="text-[#666] hover:text-[#e8e8f0]">Close</button>
+            </div>
               <p className="text-sm text-[#888] mb-2">
                 Status: <span className={grokLive ? 'text-[#00ff88]' : 'text-amber-300'}>{grokLive ? `Live Grok (${grokSource})` : 'Simulator — no API key detected'}</span>
               </p>
@@ -3343,10 +3364,10 @@ export default function IdeaSpeak() {
                 </div>
                 <p className="text-[10px] text-[#666]">Choose a personality to change how the agent talks and plans with you. Choose a TTS voice to hear it spoken in a style that feels fun and personal on your phone or computer. Switch anytime — the conversation gets a whole new flavor!</p>
               </div>
-            </div>
           </div>
-        )}
-      </AnimatePresence>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
