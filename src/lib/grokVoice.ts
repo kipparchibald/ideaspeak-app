@@ -65,7 +65,7 @@ export class GrokVoiceAgent {
 
   // ── Get ephemeral token from our Bun backend ───────────────────────────────
   private async getEphemeralToken(): Promise<string> {
-    const res = await fetch('/api/voice/token', { method: 'POST' })
+    const res = await fetch('/api/voice-token', { method: 'POST' })
     if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`)
     const data = await res.json()
     // xAI returns { client_secret: { value: "..." } }
