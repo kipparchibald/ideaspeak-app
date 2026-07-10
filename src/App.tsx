@@ -1,3 +1,4 @@
+import GrokVoiceButton from './components/GrokVoiceButton'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mic, MicOff, Send, Settings, X, Copy, Download, Zap, MessageSquare, Code2, Sparkles, RefreshCw, Eye } from 'lucide-react'
