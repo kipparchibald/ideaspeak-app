@@ -68,8 +68,9 @@ export class GrokVoiceAgent {
     const res = await fetch('/api/voice-token', { method: 'POST' })
     if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`)
     const data = await res.json()
-    // xAI returns { client_secret: { value: "..." } }
-    return data.client_secret?.value || data.token
+    const token = data.value || data.client_secret?.value || data.token
+    if (!token) throw new Error("No token: " + JSON.stringify(data))
+    return token
   }
 
   // ── Connect to Grok Voice Agent ────────────────────────────────────────────
