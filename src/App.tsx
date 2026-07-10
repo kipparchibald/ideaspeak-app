@@ -4,6 +4,7 @@ import { Mic, MicOff, Send, Settings, X, Copy, Download, Zap, MessageSquare, Cod
 import { SandpackProvider, SandpackLayout, SandpackCodeEditor, SandpackPreview, SandpackFileExplorer } from '@codesandbox/sandpack-react'
 import { sandpackDark } from '@codesandbox/sandpack-themes'
 import { toast, Toaster } from 'sonner'
+import GrokVoiceButton from './components/GrokVoiceButton'
 import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import JSZip from 'jszip'
