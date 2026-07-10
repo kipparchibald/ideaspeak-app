@@ -1,4 +1,3 @@
-import GrokVoiceButton from './components/GrokVoiceButton'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mic, MicOff, Send, Settings, X, Copy, Download, Zap, MessageSquare, Code2, Sparkles, RefreshCw, Eye } from 'lucide-react'
@@ -572,16 +571,7 @@ export default function App() {
               </button>
             </div>
 
-            
-            {`/* Grok Voice Agent */`}
-            <GrokVoiceButton
-              hasApiKey={true}
-              onTranscript={(text, isFinal) => {
-                if (isFinal && text.trim()) sendMessage(text.trim())
-                else setInput(text)
-              }}
-            />
-{/* Quick actions */}
+            {/* Quick actions */}
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {(mode === 'discuss'
                 ? ['What are the risks?', 'Who is the user?', 'What should the MVP be?']
