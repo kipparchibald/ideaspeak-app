@@ -31,7 +31,7 @@ function cors(origin: string) {
 }
 
 const server = serve({
-  port: 3001,
+  port: process.env.PORT || 3001,
   async fetch(req) {
     const url = new URL(req.url)
     const origin = req.headers.get('origin') || '*'
