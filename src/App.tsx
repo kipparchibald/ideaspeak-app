@@ -571,7 +571,16 @@ export default function App() {
               </button>
             </div>
 
-            {/* Quick actions */}
+            
+            {`/* Grok Voice Agent */`}
+            <GrokVoiceButton
+              hasApiKey={true}
+              onTranscript={(text, isFinal) => {
+                if (isFinal && text.trim()) sendMessage(text.trim())
+                else setInput(text)
+              }}
+            />
+{/* Quick actions */}
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {(mode === 'discuss'
                 ? ['What are the risks?', 'Who is the user?', 'What should the MVP be?']
