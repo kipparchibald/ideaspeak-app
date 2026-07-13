@@ -2,21 +2,24 @@
 
 **Goal:** Make IdeaSpeak a polished, public-ready demo/prototype that clearly shows the voice-first xAI advantage.
 
-**Live Demo:** https://ideaspeak-app.vercel.app
+**Live Demo:** https://ideaspeak-app.vercel.app  
+**Last updated:** July 13, 2026
 
 ---
 
-## Phase 1 — Demo Polish (Do First)
+## Phase 1 — Demo Polish (Highest Priority)
 
 - [x] Strong README with clear value proposition
 - [x] Live Vercel deployment
 - [x] PWA + mobile install instructions
 - [x] Smoke tests (`bun run smoke` / `smoke:full`)
-- [ ] Landing page / hero clearly communicates "Speak → Ship"
-- [ ] Settings modal: clear path for adding xAI API key + graceful fallback messaging
-- [ ] Simulator vs Real Grok distinction is obvious to users
+- [x] Publish checklist + demo notes
+- [x] Simulator vs Real Grok distinction documented
+- [ ] Landing page / hero clearly communicates "Speak → Ship" (needs visual polish)
+- [ ] Settings modal: crystal-clear path for adding xAI API key + graceful fallback messaging
+- [ ] Simulator vs Real Grok indicator visible in the main UI (not just docs)
 - [ ] Error states and loading states feel premium
-- [ ] Export (ZIP + GitHub) produces clean, runnable Next.js 15 projects
+- [ ] Export (ZIP + GitHub) produces clean, runnable Next.js 15 projects every time
 - [ ] One-click Vercel deploy button works in exported projects
 
 ## Phase 2 — Production Hardening
@@ -64,12 +67,14 @@ E2B_API_KEY=
 
 ---
 
-## Current Score: 7.5 / 10 (Demo-ready with light polish)
+## Current Score: **7.8 / 10** (Demo-ready with light polish remaining)
 
-**Next highest leverage items:**
-1. Make the landing experience instantly clear
-2. Perfect the "no key → simulator / with key → real Grok" messaging
-3. Ensure exported projects always build cleanly
-4. Wire real sandbox for true production feel
+**Next highest leverage items (do these next):**
+1. Make the landing experience instantly clear ("Speak your idea → ship a production app")
+2. Surface Simulator vs Real Grok status in the main UI
+3. Perfect the Settings → API key flow
+4. Ensure exported projects always build cleanly on Vercel
 
-*Last updated: July 13, 2026*
+See also: `docs/DEMO_NOTES.md` for the 30-second demo script.
+
+*Keep this file updated as the product matures.*
