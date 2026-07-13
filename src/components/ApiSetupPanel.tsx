@@ -1,12 +1,6 @@
 /**
  * ApiSetupPanel — Seamless, secure, one-site API configuration + verification
- *
- * Features:
- * - xAI (required for Real Grok)
- * - E2B (optional sandbox)
- * - One-click Verify that hits /api/status
- * - Clear live / invalid / missing states
- * - Keys stored only in localStorage (client) or server env (preferred)
+ * Includes Grok TTS voice settings
  */
 
 import { useState, useEffect } from 'react'
@@ -20,6 +14,7 @@ import {
   type ApiStatus,
   type VerifyResult,
 } from '../lib/api-verify'
+import { TtsSettingsPanel } from './TtsSettingsPanel'
 
 interface ApiSetupPanelProps {
   onKeySaved?: (hasKey: boolean) => void
@@ -36,33 +31,24 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
   const [xaiModel, setXaiModel] = useState<string | undefined>()
   const [verifying, setVerifying] = useState(false)
 
-  // Load saved keys on mount
   useEffect(() => {
     const savedXai = loadLocalXaiKey()
     const savedE2b = loadLocalE2bKey()
     setXaiKey(savedXai)
     setE2bKey(savedE2b)
-
-    // Auto-verify if we already have a key (or server key)
-    if (savedXai) {
-      runVerify(savedXai)
-    } else {
-      // Still check server-side key
-      runVerify()
-    }
+    if (savedXai) runVerify(savedXai)
+    else runVerify()
   }, [])
 
   async function runVerify(keyOverride?: string) {
     setVerifying(true)
     setXaiStatus('checking')
     setXaiMessage('Checking connection…')
-
     const result: VerifyResult = await verifyXaiKey(keyOverride ?? xaiKey)
     setXaiStatus(result.status)
     setXaiMessage(result.message)
     setXaiModel(result.model)
     setVerifying(false)
-
     onKeySaved?.(result.status === 'live')
   }
 
@@ -99,7 +85,6 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-[#00ff88]/10 border border-[#00ff88]/25 flex items-center justify-center shrink-0">
           <Shield size={18} className="text-[#00ff88]" />
@@ -108,12 +93,10 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
           <h3 className="text-[15px] font-semibold text-[#e8e8f0]">API Connections</h3>
           <p className="text-[12px] text-[#666] mt-0.5 leading-relaxed">
             Configure keys in one place. Keys stay on your device or securely on the server.
-            Never shared with third parties.
           </p>
         </div>
       </div>
 
-      {/* xAI / Grok */}
       <div className={`rounded-2xl border p-4 transition-colors ${statusColor()}`}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -200,7 +183,8 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         </a>
       </div>
 
-      {/* E2B (optional) */}
+      <TtsSettingsPanel />
+
       <div className="rounded-2xl border border-[#1f1f27] bg-[#0a0a0f] p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -211,7 +195,6 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         <p className="text-[11px] text-[#666] mb-3 leading-relaxed">
           Enables secure full-environment code execution for higher-fidelity previews.
         </p>
-
         <div className="space-y-2">
           <div className="relative">
             <input
@@ -236,7 +219,6 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
             Save E2B Key
           </button>
         </div>
-
         <a
           href="https://e2b.dev"
           target="_blank"
@@ -247,12 +229,10 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         </a>
       </div>
 
-      {/* Security note */}
       <div className="rounded-xl bg-[#111116] border border-[#1f1f27] px-3 py-2.5">
         <p className="text-[10px] text-[#555] leading-relaxed">
-          <strong className="text-[#666]">Security:</strong> Client keys stay in your browser localStorage only.
-          Production prefers a server-side <code className="text-[#00ff88]/70">XAI_API_KEY</code> env var
-          (set once in Vercel). Never commit keys to git.
+          <strong className="text-[#666]">Security:</strong> Client keys stay in browser localStorage only.
+          Production prefers server-side XAI_API_KEY on Vercel. Never commit keys to git.
         </p>
       </div>
     </div>
