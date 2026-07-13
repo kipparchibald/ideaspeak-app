@@ -8,9 +8,12 @@ import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
+import { ModeBadge } from './components/ModeBadge'
+import { ApiSetupPanel } from './components/ApiSetupPanel'
+import { loadLocalXaiKey } from './lib/api-verify'
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-type Mode = 'discuss' | 'build'
+// ── Types ──────────────────────────────────────────────────────────────────
+ type Mode = 'discuss' | 'build'
 type Personality = 'grok' | 'witty' | 'mentor' | 'coach' | 'rebel'
 type VoiceStatus = 'idle' | 'listening' | 'error'
 
@@ -81,7 +84,7 @@ body { font-family: Inter, system-ui, sans-serif; }`,
   'package.json': JSON.stringify({ name: 'ideaspeak-app', dependencies: { react: '^18.0.0', 'react-dom': '^18.0.0' } }, null, 2),
 }
 
-// ── Personality labels ─────────────────────────────────────────────────────────
+// ── Personality labels ─────────────────────────────────────────────────────
 const PERSONALITIES: { id: Personality; label: string; emoji: string }[] = [
   { id: 'grok',   label: 'Grok',    emoji: '🤖' },
   { id: 'witty',  label: 'Witty',   emoji: '😏' },
@@ -90,7 +93,7 @@ const PERSONALITIES: { id: Personality; label: string; emoji: string }[] = [
   { id: 'rebel',  label: 'Rebel',   emoji: '🔥' },
 ]
 
-// ── Voice wave bars ────────────────────────────────────────────────────────────
+// ── Voice wave bars ──────────────────────────────────────────────────────
 const WAVE_DELAYS = ['0s','0.08s','0.16s','0.24s','0.32s','0.4s','0.32s','0.24s','0.16s','0.08s']
 
 function WaveBars({ active }: { active: boolean }) {
@@ -118,7 +121,7 @@ function WaveBars({ active }: { active: boolean }) {
   )
 }
 
-// ── Settings Modal ─────────────────────────────────────────────────────────────
+// ── Settings Modal (now with full API Setup Panel) ───────────────────
 function SettingsModal({
   open, onClose, apiKey, setApiKey, personality, setPersonality, ttsEnabled, setTtsEnabled
 }: {
@@ -127,13 +130,6 @@ function SettingsModal({
   personality: Personality; setPersonality: (p: Personality) => void
   ttsEnabled: boolean; setTtsEnabled: (v: boolean) => void
 }) {
-  const [draft, setDraft] = useState(apiKey)
-  const save = () => {
-    localStorage.setItem('ideaspeak_xai_key', draft)
-    setApiKey(draft)
-    toast.success('Settings saved')
-    onClose()
-  }
   return (
     <AnimatePresence>
       {open && (
@@ -144,24 +140,23 @@ function SettingsModal({
         >
           <motion.div
             initial={{ scale: .95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: .95, opacity: 0 }}
-            style={{ background: '#111116', border: '1px solid #1f1f27', borderRadius: 20, padding: 28, width: '100%', maxWidth: 440 }}
+            style={{ background: '#111116', border: '1px solid #1f1f27', borderRadius: 20, padding: 28, width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#e8e8f0' }}>Settings</h2>
               <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}><X size={18} /></button>
             </div>
 
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.8px', marginBottom: 8 }}>
-              xAI API Key
-            </label>
-            <input
-              type="password"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              placeholder="xai-..."
-              style={{ width: '100%', background: '#0a0a0f', border: '1px solid #1f1f27', borderRadius: 10, padding: '10px 14px', color: '#e8e8f0', fontSize: 14, outline: 'none', marginBottom: 6 }}
+            {/* Seamless secure API setup */}
+            <ApiSetupPanel
+              onKeySaved={(hasKey) => {
+                const key = loadLocalXaiKey()
+                setApiKey(key)
+                if (hasKey) toast.success('Grok connected')
+              }}
             />
-            <p style={{ fontSize: 11, color: '#555', marginBottom: 24 }}>Get yours at console.x.ai · stored locally, never sent to our servers</p>
+
+            <div style={{ height: 1, background: '#1f1f27', margin: '24px 0' }} />
 
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.8px', marginBottom: 12 }}>
               AI Personality
@@ -184,7 +179,7 @@ function SettingsModal({
               ))}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 500, color: '#e8e8f0' }}>Text-to-speech</div>
                 <div style={{ fontSize: 12, color: '#555' }}>AI reads responses aloud</div>
@@ -203,13 +198,6 @@ function SettingsModal({
                 }} />
               </button>
             </div>
-
-            <button
-              onClick={save}
-              style={{ width: '100%', background: '#00ff88', color: '#0a0a0f', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-            >
-              Save settings
-            </button>
           </motion.div>
         </motion.div>
       )}
@@ -217,7 +205,7 @@ function SettingsModal({
   )
 }
 
-// ── Main App ───────────────────────────────────────────────────────────────────
+// ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   // Core state
   const [mode, setMode] = useState<Mode>('discuss')
@@ -234,7 +222,7 @@ export default function App() {
   const [showPreview, setShowPreview] = useState(true)
 
   // Settings
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ideaspeak_xai_key') || '')
+  const [apiKey, setApiKey] = useState(() => loadLocalXaiKey())
   const [personality, setPersonality] = useState<Personality>('grok')
   const [ttsEnabled, setTtsEnabled] = useState(false)
 
@@ -263,7 +251,7 @@ export default function App() {
     window.speechSynthesis.speak(utt)
   }, [ttsEnabled])
 
-  // ── Send message ─────────────────────────────────────────────────────────────
+  // ── Send message ─────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text?: string) => {
     const content = (text || input).trim()
     if (!content || isLoading) return
@@ -277,7 +265,6 @@ export default function App() {
 
     try {
       if (mode === 'discuss') {
-        // Discussion mode — conversational planning
         const history: XaiMessage[] = messages
           .filter(m => m.role !== 'assistant' || messages.indexOf(m) > 0)
           .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
@@ -289,7 +276,6 @@ export default function App() {
         speak(reply)
 
       } else {
-        // Build mode — generate files
         const result = await runIdeaSpeakAgent(content, messages, apiKey || undefined)
         const assistantMsg: ChatMessage = {
           role: 'assistant',
@@ -299,7 +285,6 @@ export default function App() {
         setMessages(prev => [...prev, assistantMsg])
         speak(assistantMsg.content)
 
-        // If we have a real API key, try full LLM generation
         if (apiKey) {
           try {
             const llmResult = await generateWithLLM(content, result.brief, apiKey, personality)
@@ -308,7 +293,7 @@ export default function App() {
               toast.success('App generated! Check the preview →')
             }
           } catch {
-            // fall through to basic result
+            // fall through
           }
         }
       }
@@ -324,7 +309,7 @@ export default function App() {
     setIsLoading(false)
   }, [input, isLoading, messages, mode, apiKey, personality, speak, voiceStatus])
 
-  // ── Voice ─────────────────────────────────────────────────────────────────────
+  // ── Voice ───────────────────────────────────────────────────────────────
   const stopVoice = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     recognitionRef.current?.abort()
@@ -388,7 +373,7 @@ export default function App() {
 
   const toggleVoice = () => voiceStatus === 'listening' ? stopVoice() : startVoice()
 
-  // ── Export ZIP ────────────────────────────────────────────────────────────────
+  // ── Export ZIP ────────────────────────────────────────────────────────
   const exportZip = async () => {
     const zip = new JSZip()
     Object.entries(generatedFiles).forEach(([path, content]) => {
@@ -415,11 +400,7 @@ export default function App() {
           <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-.3px' }}>
             IdeaSpeak<span style={{ color: '#00ff88' }}>.dev</span>
           </span>
-          {!apiKey && (
-            <span style={{ fontSize: 11, background: 'rgba(255,170,0,.12)', color: '#fa0', border: '1px solid rgba(255,170,0,.25)', borderRadius: 6, padding: '2px 8px', fontWeight: 600 }}>
-              Simulator mode
-            </span>
-          )}
+          <ModeBadge hasApiKey={!!apiKey} />
         </div>
 
         {/* Mode toggle */}
@@ -492,7 +473,6 @@ export default function App() {
               </motion.div>
             ))}
 
-            {/* Typing indicator */}
             {isLoading && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,255,136,.12)', border: '1px solid rgba(0,255,136,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -511,7 +491,6 @@ export default function App() {
 
           {/* Input area */}
           <div style={{ padding: '12px 14px', borderTop: '1px solid #1f1f27', flexShrink: 0 }}>
-            {/* Voice interim */}
             {voiceInterim && (
               <div style={{ fontSize: 12, color: '#00ff88', fontStyle: 'italic', marginBottom: 8, padding: '6px 10px', background: 'rgba(0,255,136,.06)', borderRadius: 8, border: '1px solid rgba(0,255,136,.15)' }}>
                 🎙 {voiceInterim}
@@ -519,7 +498,6 @@ export default function App() {
             )}
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              {/* Mic */}
               <button
                 onClick={toggleVoice}
                 disabled={!isSupported}
@@ -535,7 +513,6 @@ export default function App() {
                 {voiceStatus === 'listening' ? <MicOff size={16} /> : <Mic size={16} />}
               </button>
 
-              {/* Waveform when active */}
               {voiceStatus === 'listening' ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 40 }}>
                   <WaveBars active />
@@ -571,7 +548,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Quick actions */}
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {(mode === 'discuss'
                 ? ['What are the risks?', 'Who is the user?', 'What should the MVP be?']
@@ -594,7 +570,6 @@ export default function App() {
         {/* ── RIGHT: Code + Preview ── */}
         {showPreview && (
           <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {/* Toolbar */}
             <div style={{ height: 44, borderBottom: '1px solid #1f1f27', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Zap size={14} color="#00ff88" />
@@ -617,7 +592,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Sandpack */}
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <SandpackProvider
                 key={JSON.stringify(Object.keys(generatedFiles))}
