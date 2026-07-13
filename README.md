@@ -6,6 +6,10 @@ IdeaSpeak is the voice-first app builder that turns messy spoken ideas into beau
 
 **Live demo:** [ideaspeak-app.vercel.app](https://ideaspeak-app.vercel.app)
 
+> Built by Kipp Archibald. Designed to be better than generic prompt-to-app tools through engineered voice refinement and production-first agent prompts.
+
+---
+
 ## Why IdeaSpeak
 
 - **Voice-native** — Talk through your idea; the Voice Refiner elevates it into a structured brief
@@ -78,10 +82,15 @@ bun run smoke:full     # includes /api/build (~60s)
 2. Browser menu → "Add to Home Screen"
 3. Enable push alerts in Settings for build-completion notifications
 
+## Publish Status
+
+See **[PUBLISH_CHECKLIST.md](./PUBLISH_CHECKLIST.md)** for the current readiness score and remaining work.
+
 ## Docs
 
 - [README-IDEASPEAK.md](./README-IDEASPEAK.md) — Full feature list and architecture
 - [IDEA SPEAK_BETTER_THAN_PEERS_PLAN.md](./IDEA%20SPEAK_BETTER_THAN_PEERS_PLAN.md) — Product strategy and roadmap
+- [PUBLISH_CHECKLIST.md](./PUBLISH_CHECKLIST.md) — What still needs to ship
 
 ## License
 
