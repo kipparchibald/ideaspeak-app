@@ -25,15 +25,21 @@ function detectKind(text: string): 'habit' | 'client' | 'voice' | 'generic' {
   return 'generic'
 }
 
-const ENTRY_MAIN = `import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+export const PREVIEW_ENTRY_MAIN = `import { StrictMode } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import App from './App'
 import './index.css'
 
-createRoot(document.getElementById('root')!).render(
+const el = document.getElementById('root')!
+type MountEl = typeof el & { __ideaspeakRoot?: Root }
+const mount = el as MountEl
+if (!mount.__ideaspeakRoot) {
+  mount.__ideaspeakRoot = createRoot(el)
+}
+mount.__ideaspeakRoot.render(
   <StrictMode>
     <App />
-  </StrictMode>
+  </StrictMode>,
 )
 `
 
@@ -553,7 +559,7 @@ export default function App() {
 `
   return {
     'src/App.tsx': app,
-    'src/main.tsx': ENTRY_MAIN,
+    'src/main.tsx': PREVIEW_ENTRY_MAIN,
     'src/index.css': BASE_CSS,
     'package.json': packageJson('ideaspeak-waiting'),
   }
@@ -582,7 +588,7 @@ export function buildWorldClassPreview(opts: {
 
   const files: PreviewFiles = {
     'src/App.tsx': appCode,
-    'src/main.tsx': ENTRY_MAIN,
+    'src/main.tsx': PREVIEW_ENTRY_MAIN,
     'src/index.css': BASE_CSS,
     'package.json': packageJson(name),
     'README.md': `# ${name}\\n\\nLive preview from IdeaSpeak (${opts.personality || 'grok'}).\\n\\n${vision}\\n`,
@@ -618,7 +624,8 @@ export function sanitizePreviewFiles(
   if (files['App.tsx'] && !files['src/App.tsx']) {
     files['src/App.tsx'] = files['App.tsx']
   }
-  if (!files['src/main.tsx']) files['src/main.tsx'] = ENTRY_MAIN
+  // Always use our entry — prevents double createRoot when Sandpack hot-reloads
+  files['src/main.tsx'] = PREVIEW_ENTRY_MAIN
   if (!files['src/index.css']) files['src/index.css'] = BASE_CSS
   if (!files['package.json']) files['package.json'] = packageJson('ideaspeak-preview')
 

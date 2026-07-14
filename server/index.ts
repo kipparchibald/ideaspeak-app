@@ -1,10 +1,13 @@
 import { serve } from 'bun'
+import { BUILD_SYSTEM } from '../api/build-prompt.js'
 import {
   corsHeaders,
   rejectBlockedOrigin,
   rejectRateLimited,
   shouldRateLimit,
 } from '../api/security.js'
+import { parseJsonFromContent } from '../api/xai.js'
+import { PREVIEW_ENTRY_MAIN } from '../src/lib/preview-scaffold.ts'
 
 // Load local secrets (Bun auto-loads .env; also try .env.local)
 try {
@@ -29,6 +32,7 @@ try {
 const XAI_API = 'https://api.x.ai/v1/chat/completions'
 const XAI_REALTIME_SECRETS = 'https://api.x.ai/v1/realtime/client_secrets'
 const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-3'
+const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-build-0.1'
 
 type FeatureFlags = {
   xai: boolean
@@ -360,8 +364,7 @@ const server = serve({
         const system = refinerPrompt + '\n\nOutput ONLY valid JSON: { "brief": { "vision": "...", "users": "...", "keyFeatures": ["..."], "tech": "..." }, "optimizedPrompt": "full prompt for agent" }'
         const user = `Raw transcript: ${transcript}\nHistory: ${history.slice(-2).map((h: any) => h.content).join(' | ')}`
         const content = await callXaiProxy([{ role: 'system', content: system }, { role: 'user', content: user }], apiKey)
-        let parsed
-        try { const m = content.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : null } catch {}
+        const parsed = parseJsonFromContent(content)
         return Response.json({ content, parsed }, { headers })
       } catch (e: any) {
         return Response.json({ error: e.message }, { status: 500, headers })
@@ -372,29 +375,32 @@ const server = serve({
       if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
       try {
         const { transcript, brief: inputBrief, personality = 'grok' } = await req.json()
-        // Focused live-preview builder — not the full "ship to GitHub" agent prompt
-        const system = `You are IdeaSpeak LIVE PREVIEW builder. Code runs in Sandpack on the right of the screen.
-
-Output ONLY valid JSON (no markdown fences):
-{ "name": "Short Name", "plan": "2 sentences about what user sees in live preview. Never mention git/push/deploy.", "files": { "src/App.tsx": "...", "src/index.css": "...", "src/main.tsx": "..." } }
-
-Rules:
-- App.tsx: complete interactive React+TS default export, Tailwind, dark premium UI (#0a0a0f, accent #00ff88), working core loop with state.
-- Self-contained for Sandpack (no Next.js, no private APIs, no env secrets).
-- Never claim git push, GitHub, or deploy.
-- Personality flavor: ${personality}`
+        const personalityNote =
+          personality === 'witty'
+            ? ' Witty code comments.'
+            : personality === 'mentor'
+              ? ' Wise mentor tone in copy.'
+              : personality === 'coach'
+                ? ' Energetic motivational UI copy.'
+                : personality === 'rebel'
+                  ? ' Bold unconventional UI choices.'
+                  : ''
         const user = inputBrief
-          ? `Build LIVE PREVIEW app from idea: ${transcript || ''}\nBrief: ${JSON.stringify(inputBrief)}`
-          : `Build LIVE PREVIEW app from spoken idea: ${transcript}`
+          ? `Build production v1 from this plan and brief:\n${transcript || ''}\n\nBrief: ${JSON.stringify(inputBrief)}`
+          : `Build production v1 from this discussion/plan:\n${transcript || ''}`
         const content = await callXaiProxy(
-          [{ role: 'system', content: system }, { role: 'user', content: user }],
+          [{ role: 'system', content: BUILD_SYSTEM + personalityNote }, { role: 'user', content: user }],
           apiKey,
+          BUILD_MODEL,
+          { temperature: 0.55, maxTokens: 5000 },
         )
-        let parsed
-        try {
-          const m = content.match(/\{[\s\S]*\}/)
-          parsed = m ? JSON.parse(m[0]) : null
-        } catch {}
+        let parsed = parseJsonFromContent(content)
+        if (parsed?.files && typeof parsed.files === 'object') {
+          parsed = {
+            ...parsed,
+            files: { ...parsed.files, 'src/main.tsx': PREVIEW_ENTRY_MAIN },
+          }
+        }
         return Response.json({ content, parsed }, { headers })
       } catch (e: any) {
         return Response.json({ error: e.message }, { status: 500, headers })

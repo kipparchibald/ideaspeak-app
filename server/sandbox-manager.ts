@@ -4,6 +4,7 @@
  */
 
 import { Sandbox } from 'e2b'
+import { PREVIEW_ENTRY_MAIN } from '../src/lib/preview-scaffold.ts'
 
 const SANDBOX_TTL_MS = 30 * 60 * 1000 // 30 minutes
 const VITE_PORT = 5174
@@ -119,17 +120,7 @@ export default defineConfig({
       null,
       2,
     ),
-    'src/main.tsx': `import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App'
-import './index.css'
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
-`,
+    'src/main.tsx': PREVIEW_ENTRY_MAIN,
     'src/index.css': `* { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 body {

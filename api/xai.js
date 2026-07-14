@@ -1,5 +1,7 @@
 /** Shared xAI client for Edge API routes */
 
+import { jsonrepair } from 'jsonrepair'
+
 export const MODELS = {
   // Prefer fast chat models that accept max_tokens cleanly
   chat: process.env.XAI_CHAT_MODEL || 'grok-3',
@@ -94,7 +96,7 @@ export async function buildCompletion(apiKey, { messages, maxTokens = 8000, temp
   return { ok: res.ok, status: res.status, data }
 }
 
-/** Extract JSON object from LLM output (handles markdown fences) */
+/** Extract JSON object from LLM output (fences + jsonrepair for truncated/malformed JSON) */
 export function parseJsonFromContent(content) {
   if (!content) return null
   let text = content.trim()
@@ -105,7 +107,11 @@ export function parseJsonFromContent(content) {
   try {
     return JSON.parse(m[0])
   } catch {
-    return null
+    try {
+      return JSON.parse(jsonrepair(m[0]))
+    } catch {
+      return null
+    }
   }
 }
 

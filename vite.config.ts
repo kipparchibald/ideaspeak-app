@@ -16,6 +16,10 @@ export default defineConfig({
     },
   },
   server: {
+    // Local preview writes to .preview-runtime/ — don't let that invalidate the shell's deps
+    watch: {
+      ignored: ['**/.preview-runtime/**'],
+    },
     proxy: {
       // In dev, /api/* proxies to local Bun server
       '/api': {

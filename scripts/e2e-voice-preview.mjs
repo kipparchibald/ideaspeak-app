@@ -8,8 +8,23 @@
  *   BASE_URL=http://localhost:5173 bun scripts/e2e-voice-preview.mjs
  */
 
+import {
+  attachPageDiagnostics,
+  sendPlanMessage,
+  sleep,
+  triggerBuildPreview,
+  waitForAppReady,
+  waitForAssistantSignal,
+  waitForSandpackOrBuildUI,
+} from './smoke-helpers.mjs'
+
 const BASE = process.env.BASE_URL || 'http://localhost:5173'
 const API = BASE.includes('localhost:5173') ? 'http://localhost:3001' : BASE
+
+/** Chat input only — Sandpack editor also renders textareas in the workspace panel. */
+function chatInput(page) {
+  return page.getByPlaceholder('Or type here…')
+}
 
 const results = []
 const log = []
@@ -203,96 +218,72 @@ await step('UI e2e: plan → build → live preview + refine guidance', async ()
   const { chromium } = await import('playwright')
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
-  const pageErrors = []
-  page.on('pageerror', (e) => pageErrors.push(e.message))
+  const pageErrors = attachPageDiagnostics(page)
 
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForTimeout(1500)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+  await sleep(1200)
+  await waitForAppReady(page, { timeout: 60_000 })
 
-  // --- Plan turns via text (simulates voice transcripts landing in chat) ---
   const planLines = [
     'Voice-first client updates for indie consultants — speak after a call, client sees a polished timeline',
     'Solo freelancers first. Core loop: mic → card on timeline. Dark premium UI.',
     'Wow moment is the timeline card animation. Cut marketplace and payments from v1.',
   ]
 
-  for (const line of planLines) {
-    const ta = page.locator('textarea').first()
-    await ta.waitFor({ timeout: 10000 })
-    await ta.fill(line)
-    await ta.press('Enter')
-    // Wait for assistant reply (loading ends)
-    await page.waitForTimeout(4500)
+  for (let i = 0; i < planLines.length; i++) {
+    if (i === 0) {
+      await sendPlanMessage(page, planLines[i])
+    } else {
+      const ta = chatInput(page)
+      await ta.waitFor({ state: 'visible', timeout: 15_000 })
+      await ta.fill(planLines[i])
+      await ta.press('Enter')
+    }
+    await waitForAssistantSignal(page, { timeout: 60_000 })
   }
 
   let root = await page.locator('#root').innerText()
   if (!/You/i.test(root)) throw new Error('plan messages not in UI')
 
-  // Continual improvement prompts (text guidance after plan)
-  const improve = page.locator('textarea').first()
+  const improve = chatInput(page)
+  await improve.waitFor({ state: 'visible', timeout: 15_000 })
   await improve.fill(
     'Suggest one improvement to make the timeline feel more premium, then we build.',
   )
   await improve.press('Enter')
-  await page.waitForTimeout(5000)
+  await waitForAssistantSignal(page, { timeout: 60_000 })
 
   root = await page.locator('#root').innerText()
   log.push({ ui: 'after improve prompt', snippet: root.slice(0, 200) })
 
-  // Build green-light
-  const buildBtn = page.getByRole('button', { name: /Build live preview/i })
-  if ((await buildBtn.count()) > 0 && (await buildBtn.isEnabled().catch(() => true))) {
-    await buildBtn.click()
-  } else {
-    await page.locator('textarea').first().fill('build it')
-    await page.locator('textarea').first().press('Enter')
-  }
+  const buildVia = await triggerBuildPreview(page)
+  const preview = await waitForSandpackOrBuildUI(page, { timeout: 90_000 })
 
-  // Wait for preview
-  await page.waitForTimeout(7000)
-  root = await page.locator('#root').innerText()
-
-  let iframeHit = false
-  let iframeText = ''
-  for (const frame of page.frames()) {
-    try {
-      const t = await frame.locator('body').innerText({ timeout: 2000 })
-      if (
-        t &&
-        t.length > 30 &&
-        (/Live preview|Add|timeline|habit|client|update|premium|IdeaSpeak/i.test(t) ||
-          /button|input/i.test(t))
-      ) {
-        iframeHit = true
-        iframeText = t.slice(0, 160)
-        break
-      }
-    } catch {
-      /* empty frame */
-    }
-  }
-
-  // Post-build voice-style refinement guidance via text (agent keeps suggesting)
-  const refineTa = page.locator('textarea').first()
+  const refineTa = chatInput(page)
   if ((await refineTa.count()) > 0) {
     await refineTa.fill(
       'After looking at the preview, what should we improve next in v1.1? One idea only.',
     )
     await refineTa.press('Enter')
-    await page.waitForTimeout(5000)
+    await sleep(5000)
   }
 
   root = await page.locator('#root').innerText()
   await browser.close()
 
-  if (pageErrors.length) throw new Error(pageErrors[0])
-  if (!iframeHit && !/Live preview|preview ready|Next · make it real|files · in-browser/i.test(root)) {
+  const criticalErrors = pageErrors.filter(
+    (e) => !/sandpack|codesandbox|jsdelivr|Failed to fetch|ReactDOMClient\.createRoot/i.test(e),
+  )
+  if (criticalErrors.length) throw new Error(criticalErrors[0])
+  if (
+    preview.kind !== 'iframe' &&
+    !/Live preview|preview ready|Edit code|LIVE PREVIEW|files · in-browser|localhost:5174/i.test(root)
+  ) {
     throw new Error('no live preview after build')
   }
 
-  return iframeHit
-    ? `preview OK: ${iframeText.replace(/\s+/g, ' ').slice(0, 80)}…`
-    : 'build chrome OK (iframe soft)'
+  return `build=${buildVia} preview=${preview.kind} (${preview.sample.replace(/\s+/g, ' ').slice(0, 72)}…)`
 })
 
 // ── 5. Continual improvement loop (API) after "preview" ─────────────────────

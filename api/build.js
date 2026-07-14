@@ -1,30 +1,11 @@
-import { jsonrepair } from 'jsonrepair'
 import { BUILD_SYSTEM } from './build-prompt.js'
-import { getApiKey } from './xai.js'
+import { getApiKey, parseJsonFromContent } from './xai.js'
 import { corsHeaders, isAllowedOrigin, rejectRateLimitedNode } from './security.js'
 
 /** Node runtime — grok-build needs >60s; Edge times out */
 export const config = { maxDuration: 120 }
 
 const MODEL = 'grok-build-0.1'
-
-function parseJson(content) {
-  if (!content) return null
-  let t = content.trim()
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (fence) t = fence[1].trim()
-  const m = t.match(/\{[\s\S]*\}/)
-  if (!m) return null
-  try {
-    return JSON.parse(m[0])
-  } catch {
-    try {
-      return JSON.parse(jsonrepair(m[0]))
-    } catch {
-      return null
-    }
-  }
-}
 
 export default async function handler(req, res) {
   const cors = corsHeaders(req)
@@ -87,7 +68,7 @@ export default async function handler(req, res) {
     }
 
     const content = data.choices?.[0]?.message?.content || ''
-    const parsed = parseJson(content)
+    const parsed = parseJsonFromContent(content)
     return res.status(200).json({ content, parsed })
   } catch (e) {
     return res.status(500).json({ error: e?.message || 'Build failed' })

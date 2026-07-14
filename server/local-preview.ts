@@ -7,6 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Subprocess } from 'bun'
+import { PREVIEW_ENTRY_MAIN } from '../src/lib/preview-scaffold.ts'
 
 const PREVIEW_PORT = Number(process.env.IDEASPEAK_PREVIEW_PORT || 5174)
 const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}`
@@ -67,17 +68,7 @@ export default defineConfig({
       null,
       2,
     ),
-    'src/main.tsx': `import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App'
-import './index.css'
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
-`,
+    'src/main.tsx': PREVIEW_ENTRY_MAIN,
     'src/index.css': `* { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 body {
