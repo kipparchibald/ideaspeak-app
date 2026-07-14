@@ -202,6 +202,11 @@ export class BuildProgressSession {
     ]
   }
 
+  /** Public hook for callers to add a log line during async work */
+  note(text: string, agent?: string) {
+    this.push(text, agent)
+  }
+
   logRefineComplete() {
     this.push('Voice Refiner structured the brief', 'Voice Refiner')
   }

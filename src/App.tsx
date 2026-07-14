@@ -75,6 +75,13 @@ import {
   shouldRestoreWorkspace,
 } from './lib/session-history'
 import { SessionHistoryPanel } from './components/SessionHistoryPanel'
+import { BuildProgressChat } from './components/BuildProgressChat'
+import {
+  beginBuildProgress,
+  endBuildProgress,
+  EMPTY_BUILD_PROGRESS,
+  type BuildProgressSnapshot,
+} from './lib/build-progress'
 import {
   canUse,
   recordUsage,
@@ -520,6 +527,8 @@ export default function App() {
   const [previewFlash, setPreviewFlash] = useState(false)
   const [previewRevision, setPreviewRevision] = useState(0)
   const [isBuilding, setIsBuilding] = useState(false)
+  const [isUpgrading, setIsUpgrading] = useState(false)
+  const [buildProgress, setBuildProgress] = useState<BuildProgressSnapshot>(EMPTY_BUILD_PROGRESS)
   const [previewEngine, setPreviewEngine] = useState<PreviewEngine>('sandpack')
   const [e2bAvailable, setE2bAvailable] = useState(false)
   const [sandboxId, setSandboxId] = useState<string | null>(null)
@@ -1075,10 +1084,14 @@ export default function App() {
       }
 
       setIsBuilding(true)
+      setIsUpgrading(false)
+      setBuildProgress(EMPTY_BUILD_PROGRESS)
+      setWorkspaceTab('code')
+      setShowWorkspace(true)
+      setMobilePanel('app')
       voicePairRef.current?.setNarration('Scaffolding your app…', { speak: true })
       const key = apiKey || loadKey() || undefined
 
-      // Instant local scaffold so preview is never empty while APIs run
       const sim = simulateVoiceRefiner(idea)
       let brief: Record<string, unknown> = {
         ...(sim.brief as Record<string, unknown>),
@@ -1087,10 +1100,26 @@ export default function App() {
       let plan =
         'Your app is live in the Preview panel. Click around, then Ship or refine by voice.'
       let source: 'grok' | 'local' = 'local'
-      let name = 'Your app'
+      let name = String(brief.vision || idea).split(/[.!\n]/)[0].slice(0, 48).trim() || 'Your app'
+
+      const progress = beginBuildProgress(
+        'plan',
+        {
+          grokLive: grokLive || !!key,
+          projectName: name,
+          vision: String(brief.vision || idea).slice(0, 200),
+          v1Features: Array.isArray(brief.keyFeatures) ? (brief.keyFeatures as string[]) : undefined,
+        },
+        setBuildProgress,
+      )
+      progress.intro()
+      progress.logBuildRequest()
+      progress.startTicker()
 
       try {
-        // Instant world-class themed scaffold (habit / client / voice / generic)
+        progress.note('Parsing collaborative plan from voice session…', 'Voice Refiner')
+        progress.note(`Brief: ${String(brief.vision || idea).slice(0, 96)}…`, 'Architect')
+
         const themed = buildWorldClassPreview({
           vision: String(brief.vision || idea),
           original: idea,
@@ -1100,7 +1129,10 @@ export default function App() {
           personality,
         })
         name = themed.name || name
-        setGeneratedFiles(mergeProjectFiles(themed.files))
+        progress.logFiles(themed.files)
+        const merged = mergeProjectFiles(themed.files)
+        setGeneratedFiles(merged)
+        setPreviewRevision((n) => n + 1)
         voicePairRef.current?.setNarration(
           `Wrote ${Object.keys(themed.files).length} preview files`,
           { speak: true },
@@ -1108,11 +1140,15 @@ export default function App() {
         setLastBuiltName(name)
         setLastBuildPlan(plan)
         revealLivePreview()
+        setIsBuilding(false)
+        setWorkspaceTab('preview')
         recordUsage('build')
         setUsageTick((n) => n + 1)
+        progress.note('Sandpack preview mounted — check the right panel', 'Engineer')
 
-        // Optional Grok code upgrade (capped) — sanitized for Sandpack
         if (key) {
+          setIsUpgrading(true)
+          progress.note('Optional Grok upgrade — richer components…', 'Builder')
           try {
             const refined = await Promise.race([
               runIdeaSpeakAgent(idea, history, key),
@@ -1121,12 +1157,14 @@ export default function App() {
             if (refined?.brief) {
               brief = { ...(refined.brief as Record<string, unknown>), original: idea }
               if (refined.plan) plan = sanitizeBuildTalk(refined.plan)
+              progress.note('Agent brief refined', 'Voice Refiner')
             }
             const llmResult = await Promise.race([
               generateWithLLM(idea, brief, key, personality),
               new Promise<null>((r) => setTimeout(() => r(null), 45000)),
             ])
             if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
+              progress.logFiles(llmResult.files as Record<string, { code: string } | string>)
               const files = mergeProjectFiles(
                 toSandpackFiles(llmResult.files as GeneratedFiles),
               )
@@ -1137,18 +1175,24 @@ export default function App() {
               setLastBuildPlan(plan)
               source = 'grok'
               setPreviewRevision((n) => n + 1)
-              toast.success('Live preview upgraded', {
-                description: 'Grok files · fully interactive',
-              })
-              return { plan, name, source }
+              progress.note('Grok upgrade applied to preview', 'Builder')
+            } else {
+              progress.note('Grok upgrade skipped — local scaffold is live', 'Builder')
             }
           } catch (e) {
             console.warn('Grok upgrade skipped', e)
+            progress.note('Grok upgrade skipped — local preview still live', 'Builder')
+          } finally {
+            setIsUpgrading(false)
           }
         }
 
+        await progress.complete(name, source === 'grok')
         toast.success('Live preview ready', {
-          description: `${themed.kind} experience · click around on the right`,
+          description:
+            source === 'grok'
+              ? `${name} · Grok build`
+              : `${themed.kind} experience · click around on the right`,
         })
         return { plan, name, source }
       } catch (e) {
@@ -1159,15 +1203,22 @@ export default function App() {
           keyFeatures: ['Core loop'],
           personality,
         })
+        progress.logFiles(fallback.files)
         setGeneratedFiles(mergeProjectFiles(fallback.files))
         revealLivePreview()
+        setIsBuilding(false)
+        setIsUpgrading(false)
+        await progress.complete(fallback.name, false)
         toast.success('Live preview ready')
         return { plan, name: fallback.name, source: 'local' as const }
       } finally {
         setIsBuilding(false)
+        setIsUpgrading(false)
+        endBuildProgress()
+        window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
       }
     },
-    [apiKey, personality, revealLivePreview],
+    [apiKey, personality, revealLivePreview, grokLive],
   )
 
   const sendMessage = useCallback(
@@ -1889,7 +1940,17 @@ export default function App() {
               </motion.div>
             ))}
 
-            {isLoading && (
+            {(isBuilding || isUpgrading || buildProgress.log.length > 0) && (
+              <BuildProgressChat
+                progress={buildProgress}
+                codePeek={{
+                  path: 'src/App.tsx',
+                  code: generatedFiles['src/App.tsx'] || '',
+                }}
+              />
+            )}
+
+            {isLoading && !isBuilding && !isUpgrading && buildProgress.log.length === 0 && (
               <div className="flex gap-2.5">
                 <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center bg-[#00ff88]/10 border border-[#00ff88]/20">
                   <Sparkles size={12} className="text-[#00ff88]" />
@@ -2446,8 +2507,15 @@ export default function App() {
               {isBuilding && (
                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#08080c]/90 backdrop-blur-md">
                   <div className="w-10 h-10 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
-                  <p className="text-[14px] font-semibold text-[#00ff88]">Compiling live preview…</p>
-                  <p className="text-[11px] text-[#555]">Interactive app · runs in-browser</p>
+                  <p className="text-[14px] font-semibold text-[#00ff88] text-center px-6">
+                    {buildProgress.headline || 'Compiling live preview…'}
+                  </p>
+                  <p className="text-[11px] text-[#555]">Watch the chat for agent + file log</p>
+                </div>
+              )}
+              {isUpgrading && !isBuilding && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 rounded-full bg-[#7dd3fc]/15 border border-[#7dd3fc]/35 text-[#7dd3fc] text-[11px] font-semibold pointer-events-none">
+                  Grok upgrading preview…
                 </div>
               )}
               {sandboxLoading && previewEngine === 'sandbox' && !isBuilding && (
