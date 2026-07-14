@@ -194,18 +194,17 @@ function replySignalsPlanReady(text: string): boolean {
 /** Grok Voice agent committed to handing off — should auto-trigger build */
 function replySignalsBuildHandoff(text: string): boolean {
   const t = text.toLowerCase()
-  if (/\b(hand(ing)? (it )?off to the builder|hand off to the builder)\b/.test(t)) return true
-  if (/\b(kicking off the build|starting the build|builder is (on it|starting|taking))\b/.test(t)) {
+  if (/\b(hand(ing)? (it )?off|handoff|hand off)\b/.test(t) && /\b(build|builder)\b/.test(t)) {
     return true
   }
-  if (
-    /\b(watch the (live )?preview|check the (live )?preview|preview (is|will be) (up|live))\b/.test(
-      t,
-    ) &&
-    /\b(hand|build|builder|kick|start|watch|go)\b/.test(t)
-  ) {
+  if (/\b(kicking off|starting|spinning up|firing up).{0,24}\b(build|builder|preview)\b/.test(t)) {
     return true
   }
+  if (/\b(builder is (on it|starting|taking|running))\b/.test(t)) return true
+  if (/\b(watch the (live )?preview|check the (live )?preview|preview (is|will be) (up|live))\b/.test(t)) {
+    return true
+  }
+  if (/\b(compiling|materializing|generating).{0,20}\b(preview|app|build)\b/.test(t)) return true
   return false
 }
 
@@ -699,12 +698,14 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessageRef =
-    useRef<(text?: string, modeOverride?: Mode, opts?: { force?: boolean }) => Promise<void>>(
-      async () => {},
-    )
+    useRef<
+      (text?: string, modeOverride?: Mode, opts?: { force?: boolean; voiceHandoff?: boolean }) => Promise<void>
+    >(async () => {})
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const voiceBuildScheduledRef = useRef(false)
+  const voiceBuildTimerRef = useRef<number | null>(null)
+  const buildInFlightRef = useRef(false)
   /** Keep realtime Grok Voice alive through handoff → build */
   const voiceBuildHandoffRef = useRef(false)
 
@@ -746,6 +747,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       voiceActiveRef.current = false
+      if (voiceBuildTimerRef.current) clearTimeout(voiceBuildTimerRef.current)
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       try {
         recognitionRef.current?.abort?.()
@@ -802,7 +804,9 @@ export default function App() {
 
   const stopVoice = useCallback(() => {
     voiceActiveRef.current = false
-    voiceBuildHandoffRef.current = false
+    if (!voiceBuildScheduledRef.current && !buildInFlightRef.current) {
+      voiceBuildHandoffRef.current = false
+    }
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = null
@@ -848,12 +852,30 @@ export default function App() {
     }
   }, [])
 
-  const scheduleVoiceBuild = useCallback((reason: string) => {
+  const kickVoiceBuild = useCallback((reason: string) => {
+    if (buildInFlightRef.current) return
     if (voiceBuildScheduledRef.current) return
     voiceBuildScheduledRef.current = true
     voiceBuildHandoffRef.current = true
     setPlanReady(true)
     setMode('build')
+    setWorkspaceTab('code')
+    setShowWorkspace(true)
+    setMobilePanel('app')
+    setIsBuilding(true)
+    setBuildProgress({
+      headline: 'Voice handoff — compiling your plan into a live preview…',
+      phase: 'working',
+      log: [
+        {
+          id: `handoff-${Date.now()}`,
+          ts: Date.now(),
+          text: reason,
+          agent: 'IdeaSpeak',
+        },
+      ],
+      kind: 'plan',
+    })
     toast.message('Building your preview…', { description: reason })
 
     const agent = grokAgentRef.current
@@ -863,11 +885,13 @@ export default function App() {
       )
     }
 
-    window.setTimeout(() => {
-      void sendMessageRef.current('build it', 'build', { force: true }).finally(() => {
+    if (voiceBuildTimerRef.current) clearTimeout(voiceBuildTimerRef.current)
+    voiceBuildTimerRef.current = window.setTimeout(() => {
+      voiceBuildTimerRef.current = null
+      void sendMessageRef.current('build it', 'build', { force: true, voiceHandoff: true }).finally(() => {
         voiceBuildScheduledRef.current = false
       })
-    }, 1600)
+    }, 350)
   }, [])
 
   const stopVoicePair = useCallback(() => {
@@ -1089,12 +1113,22 @@ export default function App() {
   /** Always produce a runnable preview — local scaffold first (instant), Grok optional upgrade */
   const materializeApp = useCallback(
     async (idea: string, history: ChatMessage[]) => {
+      if (buildInFlightRef.current) {
+        return {
+          plan: lastBuildPlan || 'Preview is already building — check the right panel.',
+          name: lastBuiltName || 'Your app',
+          source: 'local' as const,
+        }
+      }
+      buildInFlightRef.current = true
+
       const gate = canUse('build')
       if (!gate.ok) {
         toast.error(gate.reason || 'Build limit reached', {
           action: { label: 'Upgrade', onClick: () => setShowPricing(true) },
         })
         setShowPricing(true)
+        buildInFlightRef.current = false
         throw new Error('PLAN_LIMIT')
       }
 
@@ -1180,7 +1214,7 @@ export default function App() {
         }).then((saved) => {
           if (saved) setProjectsRevision((n) => n + 1)
         })
-        await progress.complete(name, false)
+        void progress.complete(name, false)
         toast.success('Live preview ready', {
           description: `${themed.kind} experience · click around on the right`,
         })
@@ -1260,10 +1294,11 @@ export default function App() {
         revealLivePreview()
         setIsBuilding(false)
         setIsUpgrading(false)
-        await progress.complete(fallback.name, false)
+        void progress.complete(fallback.name, false)
         toast.success('Live preview ready')
         return { plan, name: fallback.name, source: 'local' as const }
       } finally {
+        buildInFlightRef.current = false
         setIsBuilding(false)
         const finishProgress = () => {
           endBuildProgress()
@@ -1277,11 +1312,11 @@ export default function App() {
         }
       }
     },
-    [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId],
+    [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],
   )
 
   const sendMessage = useCallback(
-    async (text?: string, modeOverride?: Mode, opts?: { force?: boolean }) => {
+    async (text?: string, modeOverride?: Mode, opts?: { force?: boolean; voiceHandoff?: boolean }) => {
       const content = (text || input).trim()
       if (!content) return
       // Default: stay in plan/discuss. Only build on explicit green-light or Build mode send.
@@ -1303,13 +1338,19 @@ export default function App() {
         toast.message('Still working on the last turn…')
         return
       }
+      if (isBuildIntent && buildInFlightRef.current && !opts?.voiceHandoff) {
+        toast.message('Build already in progress — watch the preview panel.')
+        return
+      }
 
-      const fromVoice = voiceTurnRef.current
+      const fromVoice =
+        opts?.voiceHandoff || voiceTurnRef.current || voiceBuildHandoffRef.current
       voiceTurnRef.current = false
 
       setInput('')
       setVoiceInterim('')
       const keepGrokVoice =
+        opts?.voiceHandoff ||
         voiceBuildHandoffRef.current ||
         (activeMode === 'build' && grokAgentRef.current?.isConnected() && voiceActiveRef.current)
       if (
@@ -1336,6 +1377,8 @@ export default function App() {
         messagesRef.current = nextHistory
         setMessages(nextHistory)
       }
+      if (isBuildIntent) setIsBuilding(true)
+
       setIsLoading(true)
 
       try {
@@ -1385,7 +1428,7 @@ export default function App() {
             setPlanReady(true)
           }
           if (fromVoice && replySignalsBuildHandoff(reply)) {
-            scheduleVoiceBuild('Grok handed off to the builder — watch the preview panel.')
+            kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
 
           // Browser STT fallback only — realtime Grok Voice already spoke the reply
@@ -1416,6 +1459,11 @@ export default function App() {
           }
         }
       } catch (err) {
+        if (activeMode === 'build') {
+          setIsBuilding(false)
+          buildInFlightRef.current = false
+          voiceBuildHandoffRef.current = false
+        }
         if (err instanceof Error && err.message === 'PLAN_LIMIT') {
           // already toasted + pricing opened
         } else {
@@ -1432,9 +1480,9 @@ export default function App() {
           ])
           toast.error(activeMode === 'build' ? 'Build failed' : 'Could not reach the agent')
         }
+      } finally {
+        setIsLoading(false)
       }
-
-      setIsLoading(false)
     },
     [
       input,
@@ -1448,7 +1496,7 @@ export default function App() {
       ttsEnabled,
       voiceStatus,
       stopVoice,
-      scheduleVoiceBuild,
+      kickVoiceBuild,
       materializeApp,
     ],
   )
@@ -1503,7 +1551,7 @@ export default function App() {
           const content = text.trim()
           appendChatMessage({ role: 'user', content, timestamp: Date.now() })
           if (wantsBuild(content)) {
-            scheduleVoiceBuild('You said build — compiling the plan into a live preview.')
+            kickVoiceBuild('You said build — compiling the plan into a live preview.')
           } else {
             const n = messagesRef.current.filter((m) => m.role === 'user').length
             if (n >= 3) setPlanReady(true)
@@ -1518,7 +1566,7 @@ export default function App() {
           appendChatMessage({ role: 'assistant', content, timestamp: Date.now() })
           if (replySignalsPlanReady(content)) setPlanReady(true)
           if (replySignalsBuildHandoff(content)) {
-            scheduleVoiceBuild('Grok handed off to the builder — watch the preview panel.')
+            kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
         }
       },
@@ -1553,7 +1601,7 @@ export default function App() {
     toast.success('Grok Voice live — talk to Grok')
   }, [
     appendChatMessage,
-    scheduleVoiceBuild,
+    kickVoiceBuild,
     stopVoice,
     grokVoiceId,
     planReady,
