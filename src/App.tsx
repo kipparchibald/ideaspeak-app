@@ -104,6 +104,7 @@ import {
   starterPreviewFiles,
   sanitizePreviewFiles,
   buildWorldClassPreview,
+  isRunnableSandpackApp,
 } from './lib/preview-scaffold'
 import {
   checkSandboxAvailable,
@@ -321,11 +322,13 @@ const SandpackWorkspace = lazy(async () => {
     appTsxLength,
   }: SandpackWorkspaceProps) {
     return (
+      <div className="absolute inset-0 h-full w-full min-h-0">
       <SandpackProvider
         key={`sp-${previewRevision}-${workspaceTab}-${hasBuilt}-${appTsxLength}`}
         template="react-ts"
         theme={sandpackDark}
         files={generatedFiles}
+        className="!h-full !min-h-0"
         options={{
           activeFile: 'src/App.tsx',
           visibleFiles: visibleSandpackFiles,
@@ -375,6 +378,7 @@ const SandpackWorkspace = lazy(async () => {
           </SandpackLayout>
         )}
       </SandpackProvider>
+      </div>
     )
   }
 
@@ -640,7 +644,12 @@ export default function App() {
         sandboxIdRef.current = session.sandboxId
 
         if (session.isStub) {
-          setSandboxStatus(session.error || 'E2B not configured on server')
+          const msg = session.error || 'E2B not configured on server'
+          setSandboxStatus(msg)
+          if (!cancelled) {
+            setPreviewEngine('sandpack')
+            toast.message('Using in-browser preview', { description: msg })
+          }
           return
         }
 
@@ -654,14 +663,20 @@ export default function App() {
           session.previewUrl || (await waitForSandboxReady(session.sandboxId))
         if (!cancelled) {
           setSandboxPreviewUrl(url)
-          if (!url) setSandboxStatus('Sandbox timed out — check server logs')
-          else setSandboxStatus('')
+          if (!url) {
+            setSandboxStatus('Sandbox timed out — check server logs')
+            setPreviewEngine('sandpack')
+            toast.message('Using in-browser preview', {
+              description: 'E2B sandbox timed out — Sandpack preview is live',
+            })
+          } else setSandboxStatus('')
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Sandbox failed'
         if (!cancelled) {
           setSandboxStatus(msg)
-          toast.error('E2B sandbox failed', { description: msg })
+          setPreviewEngine('sandpack')
+          toast.message('Using in-browser preview', { description: msg })
         }
       } finally {
         if (!cancelled) setSandboxLoading(false)
@@ -693,7 +708,10 @@ export default function App() {
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const sendMessageRef = useRef<(text?: string, modeOverride?: Mode) => Promise<void>>(async () => {})
+  const sendMessageRef =
+    useRef<(text?: string, modeOverride?: Mode, opts?: { force?: boolean }) => Promise<void>>(
+      async () => {},
+    )
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const voiceBuildScheduledRef = useRef(false)
@@ -840,30 +858,27 @@ export default function App() {
     }
   }, [])
 
-  const scheduleVoiceBuild = useCallback(
-    (reason: string) => {
-      if (voiceBuildScheduledRef.current || hasBuilt) return
-      voiceBuildScheduledRef.current = true
-      voiceBuildHandoffRef.current = true
-      setPlanReady(true)
-      setMode('build')
-      toast.message('Building your preview…', { description: reason })
+  const scheduleVoiceBuild = useCallback((reason: string) => {
+    if (voiceBuildScheduledRef.current) return
+    voiceBuildScheduledRef.current = true
+    voiceBuildHandoffRef.current = true
+    setPlanReady(true)
+    setMode('build')
+    toast.message('Building your preview…', { description: reason })
 
-      const agent = grokAgentRef.current
-      if (agent?.isConnected()) {
-        agent.speakLine(
-          'Briefly tell the user you are kicking off the builder and they should watch the live preview on the right. One or two sentences, Grok voice, high energy.',
-        )
-      }
+    const agent = grokAgentRef.current
+    if (agent?.isConnected()) {
+      agent.speakLine(
+        'Briefly tell the user you are kicking off the builder and they should watch the live preview on the right. One or two sentences, Grok voice, high energy.',
+      )
+    }
 
-      window.setTimeout(() => {
-        void sendMessageRef.current('build it', 'build').finally(() => {
-          voiceBuildScheduledRef.current = false
-        })
-      }, 1600)
-    },
-    [hasBuilt],
-  )
+    window.setTimeout(() => {
+      void sendMessageRef.current('build it', 'build', { force: true }).finally(() => {
+        voiceBuildScheduledRef.current = false
+      })
+    }, 1600)
+  }, [])
 
   const stopVoicePair = useCallback(() => {
     voicePairRef.current?.dispose()
@@ -1150,55 +1165,70 @@ export default function App() {
         recordUsage('build')
         setUsageTick((n) => n + 1)
         progress.note('Sandpack preview mounted — check the right panel', 'Engineer')
+        persistSessionSnapshot({
+          workspaceId: activeWorkspaceId,
+          messages: history,
+          mode: 'build',
+          planReady: true,
+          hasBuilt: true,
+          generatedFiles: merged,
+          lastBuiltName: name,
+          lastBuildPlan: plan,
+          personality,
+        })
+        await progress.complete(name, false)
+        toast.success('Live preview ready', {
+          description: `${themed.kind} experience · click around on the right`,
+        })
 
         if (key) {
-          setIsUpgrading(true)
-          progress.note('Optional Grok upgrade — richer components…', 'Builder')
-          try {
-            const refined = await Promise.race([
-              runIdeaSpeakAgent(idea, history, key),
-              new Promise<null>((r) => setTimeout(() => r(null), 12000)),
-            ])
-            if (refined?.brief) {
-              brief = { ...(refined.brief as Record<string, unknown>), original: idea }
-              if (refined.plan) plan = sanitizeBuildTalk(refined.plan)
-              progress.note('Agent brief refined', 'Voice Refiner')
+          void (async () => {
+            setIsUpgrading(true)
+            progress.note('Optional Grok upgrade — richer components…', 'Builder')
+            try {
+              const refined = await Promise.race([
+                runIdeaSpeakAgent(idea, history, key),
+                new Promise<null>((r) => setTimeout(() => r(null), 12000)),
+              ])
+              if (refined?.brief) {
+                brief = { ...(refined.brief as Record<string, unknown>), original: idea }
+                if (refined.plan) plan = sanitizeBuildTalk(refined.plan)
+                progress.note('Agent brief refined', 'Voice Refiner')
+              }
+              const llmResult = await Promise.race([
+                generateWithLLM(idea, brief, key, personality),
+                new Promise<null>((r) => setTimeout(() => r(null), 45000)),
+              ])
+              if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
+                const candidate = mergeProjectFiles(
+                  toSandpackFiles(llmResult.files as GeneratedFiles),
+                )
+                if (isRunnableSandpackApp(candidate)) {
+                  progress.logFiles(llmResult.files as Record<string, { code: string } | string>)
+                  setGeneratedFiles(candidate)
+                  name = llmResult.name || name
+                  if (llmResult.plan) plan = sanitizeBuildTalk(llmResult.plan)
+                  setLastBuiltName(name)
+                  setLastBuildPlan(plan)
+                  source = 'grok'
+                  setPreviewRevision((n) => n + 1)
+                  progress.note('Grok upgrade applied to preview', 'Builder')
+                  toast.success('Preview upgraded', { description: `${name} · Grok build` })
+                } else {
+                  progress.note('Grok upgrade skipped — keeping working local preview', 'Builder')
+                }
+              } else {
+                progress.note('Grok upgrade skipped — local scaffold is live', 'Builder')
+              }
+            } catch (e) {
+              console.warn('Grok upgrade skipped', e)
+              progress.note('Grok upgrade skipped — local preview still live', 'Builder')
+            } finally {
+              setIsUpgrading(false)
             }
-            const llmResult = await Promise.race([
-              generateWithLLM(idea, brief, key, personality),
-              new Promise<null>((r) => setTimeout(() => r(null), 45000)),
-            ])
-            if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
-              progress.logFiles(llmResult.files as Record<string, { code: string } | string>)
-              const files = mergeProjectFiles(
-                toSandpackFiles(llmResult.files as GeneratedFiles),
-              )
-              setGeneratedFiles(files)
-              name = llmResult.name || name
-              if (llmResult.plan) plan = sanitizeBuildTalk(llmResult.plan)
-              setLastBuiltName(name)
-              setLastBuildPlan(plan)
-              source = 'grok'
-              setPreviewRevision((n) => n + 1)
-              progress.note('Grok upgrade applied to preview', 'Builder')
-            } else {
-              progress.note('Grok upgrade skipped — local scaffold is live', 'Builder')
-            }
-          } catch (e) {
-            console.warn('Grok upgrade skipped', e)
-            progress.note('Grok upgrade skipped — local preview still live', 'Builder')
-          } finally {
-            setIsUpgrading(false)
-          }
+          })()
         }
 
-        await progress.complete(name, source === 'grok')
-        toast.success('Live preview ready', {
-          description:
-            source === 'grok'
-              ? `${name} · Grok build`
-              : `${themed.kind} experience · click around on the right`,
-        })
         return { plan, name, source }
       } catch (e) {
         console.error(e)
@@ -1223,14 +1253,14 @@ export default function App() {
         window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
       }
     },
-    [apiKey, personality, revealLivePreview, grokLive],
+    [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId],
   )
 
   const sendMessage = useCallback(
-    async (text?: string, modeOverride?: Mode) => {
+    async (text?: string, modeOverride?: Mode, opts?: { force?: boolean }) => {
       const content = (text || input).trim()
       if (!content) return
-      if (isLoading) {
+      if (isLoading && !opts?.force) {
         toast.message('Still working on the last turn…')
         return
       }

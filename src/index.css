@@ -126,6 +126,13 @@ input:focus-visible {
   --sp-colors-fg-default: #e8e8f0 !important;
   --sp-colors-fg-muted: #888 !important;
   --sp-border: #1f1f27 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+.sp-preview-container,
+.sp-preview-iframe {
+  height: 100% !important;
+  min-height: 0 !important;
 }
 
 ::selection {
@@ -145,6 +152,8 @@ input:focus-visible {
 /* Sandpack chrome — quieter borders */
 .sp-layout {
   border: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
 }
 .sp-preview-container {
   background: #0a0a0f !important;

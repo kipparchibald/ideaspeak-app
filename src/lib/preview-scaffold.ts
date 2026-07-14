@@ -592,6 +592,15 @@ export function buildWorldClassPreview(opts: {
 }
 
 /** Ensure LLM-generated files are Sandpack-safe enough to show something */
+/** True when App.tsx is runnable inside Sandpack (export default + minimum size). */
+export function isRunnableSandpackApp(files: PreviewFiles): boolean {
+  const app = String(files['src/App.tsx'] || files['App.tsx'] || '')
+  if (app.length < 80) return false
+  if (!/export\s+default/.test(app)) return false
+  if (/from\s+['"]next\//.test(app)) return false
+  return true
+}
+
 export function sanitizePreviewFiles(
   incoming: PreviewFiles,
   fallbackBrief: { vision?: string; original?: string; keyFeatures?: string[] },
