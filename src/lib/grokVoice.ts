@@ -26,9 +26,18 @@ export type GrokVoiceState =
   | 'speaking'
   | 'error'
 
+export interface GrokVoiceConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface GrokVoiceOptions {
   voice?: VoiceId
   instructions?: string
+  /** Prior turns from History — seeded into realtime session on connect */
+  conversationSeed?: GrokVoiceConversationTurn[]
+  /** Overrides default first greeting */
+  greetingInstructions?: string
   /** User speech transcript */
   onUserTranscript?: (text: string, isFinal: boolean) => void
   /** Grok spoken reply as text (when available) */
@@ -76,6 +85,7 @@ export class GrokVoiceAgent {
   private assistantBuf = ''
   private userBuf = ''
   private nextPlayTime = 0
+  private conversationSeeded = false
 
   constructor(opts: GrokVoiceOptions = {}) {
     this.opts = {
@@ -154,7 +164,7 @@ export class GrokVoiceAgent {
               },
             }),
           )
-          void this.startMicrophone()
+          void this.startMicrophone(this.opts.greetingInstructions)
             .then(() => {
               window.clearTimeout(timeout)
               resolve()
@@ -196,6 +206,10 @@ export class GrokVoiceAgent {
     switch (event.type) {
       case 'session.created':
       case 'session.updated':
+        if (!this.conversationSeeded) {
+          this.seedConversation(this.opts.conversationSeed)
+          this.conversationSeeded = true
+        }
         if (this.state === 'connecting') this.setState('listening')
         break
 
@@ -305,7 +319,24 @@ export class GrokVoiceAgent {
     return btoa(binary)
   }
 
-  private async startMicrophone() {
+  private seedConversation(turns?: GrokVoiceConversationTurn[]) {
+    if (!turns?.length || this.ws?.readyState !== WebSocket.OPEN) return
+    for (const turn of turns) {
+      const role = turn.role === 'assistant' ? 'assistant' : 'user'
+      this.ws?.send(
+        JSON.stringify({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role,
+            content: [{ type: role === 'user' ? 'input_text' : 'text', text: turn.content }],
+          },
+        }),
+      )
+    }
+  }
+
+  private async startMicrophone(greetingInstructions?: string) {
     try {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -348,13 +379,14 @@ export class GrokVoiceAgent {
 
       this.setState('listening')
 
-      // Grok greets first so the user hears real Grok voice immediately
       this.ws?.send(
         JSON.stringify({
           type: 'response.create',
           response: {
             modalities: ['audio', 'text'],
             instructions:
+              greetingInstructions ||
+              this.opts.greetingInstructions ||
               'Greet briefly as Grok (one short sentence). Ask who the product is for and what they do every day. No corporate fluff.',
           },
         }),

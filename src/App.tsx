@@ -94,6 +94,11 @@ import {
   type GrokVoiceState,
   type VoiceId,
 } from './lib/grokVoice'
+import {
+  buildVoiceGreetingInstructions,
+  buildVoiceSessionInstructions,
+  voiceConversationSeed,
+} from './lib/voice-session-context'
 import { speak as speakGrokTts, type GrokVoiceId } from './lib/tts'
 import {
   starterPreviewFiles,
@@ -1403,8 +1408,24 @@ export default function App() {
     setAssistantLiveLine('')
     toast.message('Connecting to Grok Voice…')
 
+    const historyMessages = messagesRef.current.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }))
+    const voiceCtx = {
+      messages: historyMessages,
+      planReady,
+      hasBuilt,
+      appName: lastBuiltName,
+      planSummary: lastBuildPlan,
+      mode,
+    }
+
     const agent = new GrokVoiceAgent({
       voice: grokVoiceId,
+      instructions: buildVoiceSessionInstructions(voiceCtx),
+      conversationSeed: voiceConversationSeed(historyMessages),
+      greetingInstructions: buildVoiceGreetingInstructions(voiceCtx),
       onStateChange: (s) => {
         if (!voiceActiveRef.current && s !== 'idle') return
         setVoiceStatus(mapGrokState(s))
@@ -1460,7 +1481,17 @@ export default function App() {
     setGrokLive(true)
     setHideSimBanner(true)
     toast.success('Grok Voice live — talk to Grok')
-  }, [appendChatMessage, scheduleVoiceBuild, stopVoice, grokVoiceId])
+  }, [
+    appendChatMessage,
+    scheduleVoiceBuild,
+    stopVoice,
+    grokVoiceId,
+    planReady,
+    hasBuilt,
+    lastBuiltName,
+    lastBuildPlan,
+    mode,
+  ])
 
   const startVoice = useCallback(async () => {
     try {
