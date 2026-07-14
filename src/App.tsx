@@ -153,6 +153,24 @@ function replySignalsPlanReady(text: string): boolean {
   )
 }
 
+/** Grok Voice agent committed to handing off — should auto-trigger build */
+function replySignalsBuildHandoff(text: string): boolean {
+  const t = text.toLowerCase()
+  if (/\b(hand(ing)? (it )?off to the builder|hand off to the builder)\b/.test(t)) return true
+  if (/\b(kicking off the build|starting the build|builder is (on it|starting|taking))\b/.test(t)) {
+    return true
+  }
+  if (
+    /\b(watch the (live )?preview|check the (live )?preview|preview (is|will be) (up|live))\b/.test(
+      t,
+    ) &&
+    /\b(hand|build|builder|kick|start|watch|go)\b/.test(t)
+  ) {
+    return true
+  }
+  return false
+}
+
 /** Compile conversation into a build brief so generation uses the plan, not one utterance */
 function compilePlanBrief(messages: ChatMessage[]): string {
   const users = messages.filter((m) => m.role === 'user').map((m) => m.content)
@@ -645,6 +663,17 @@ export default function App() {
   const sendMessageRef = useRef<(text?: string, modeOverride?: Mode) => Promise<void>>(async () => {})
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+  const voiceBuildScheduledRef = useRef(false)
+
+  const appendChatMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1]
+      if (last?.role === msg.role && last.content === msg.content) return prev
+      const next = [...prev, msg]
+      messagesRef.current = next
+      return next
+    })
+  }, [])
 
   // Mic always available — Grok Voice uses getUserMedia; browser STT is fallback only
   const isSupported =
@@ -820,6 +849,23 @@ export default function App() {
       /* ignore */
     }
   }, [])
+
+  const scheduleVoiceBuild = useCallback(
+    (reason: string) => {
+      if (voiceBuildScheduledRef.current || hasBuilt) return
+      voiceBuildScheduledRef.current = true
+      setPlanReady(true)
+      setMode('build')
+      toast.message('Building your preview…', { description: reason })
+      window.setTimeout(() => {
+        stopVoice()
+        void sendMessageRef.current('build it', 'build').finally(() => {
+          voiceBuildScheduledRef.current = false
+        })
+      }, 1400)
+    },
+    [hasBuilt, stopVoice],
+  )
 
   const stopVoicePair = useCallback(() => {
     voicePairRef.current?.dispose()
@@ -1067,7 +1113,8 @@ export default function App() {
       }
 
       const userMsg: ChatMessage = { role: 'user', content, timestamp: Date.now() }
-      const nextHistory = [...messages, userMsg]
+      const nextHistory = [...messagesRef.current, userMsg]
+      messagesRef.current = nextHistory
       setMessages(nextHistory)
       setIsLoading(true)
 
@@ -1116,6 +1163,9 @@ export default function App() {
           const userCount = nextHistory.filter((m) => m.role === 'user').length
           if (replySignalsPlanReady(reply) || userCount >= 3) {
             setPlanReady(true)
+          }
+          if (fromVoice && replySignalsBuildHandoff(reply)) {
+            scheduleVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
 
           // Always speak plan replies (especially after mic) — this is the collaboration
@@ -1171,6 +1221,7 @@ export default function App() {
       ttsEnabled,
       voiceStatus,
       stopVoice,
+      scheduleVoiceBuild,
       materializeApp,
     ],
   )
@@ -1189,6 +1240,7 @@ export default function App() {
   /** Real Grok Voice (speech↔speech). Falls back to browser STT only if token fails. */
   const startGrokVoice = useCallback(async () => {
     stopVoice()
+    voiceBuildScheduledRef.current = false
     voiceActiveRef.current = true
     setVoiceStatus('connecting')
     setVoiceInterim('')
@@ -1206,22 +1258,11 @@ export default function App() {
         setVoiceInterim(isFinal ? '' : text)
         if (isFinal) {
           const content = text.trim()
-          setMessages((prev) => {
-            // Avoid duplicate finals
-            const last = prev[prev.length - 1]
-            if (last?.role === 'user' && last.content === content) return prev
-            return [...prev, { role: 'user', content, timestamp: Date.now() }]
-          })
+          appendChatMessage({ role: 'user', content, timestamp: Date.now() })
           if (wantsBuild(content)) {
-            setPlanReady(true)
-            // End voice call then build from full plan
-            window.setTimeout(() => {
-              stopVoice()
-              void sendMessageRef.current('build it', 'build')
-            }, 400)
+            scheduleVoiceBuild('You said build — compiling the plan into a live preview.')
           } else {
-            const n =
-              messagesRef.current.filter((m) => m.role === 'user').length + 1
+            const n = messagesRef.current.filter((m) => m.role === 'user').length
             if (n >= 3) setPlanReady(true)
           }
         }
@@ -1231,12 +1272,11 @@ export default function App() {
         setAssistantLiveLine(isFinal ? '' : text)
         if (isFinal) {
           const content = text.trim()
-          setMessages((prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === 'assistant' && last.content === content) return prev
-            return [...prev, { role: 'assistant', content, timestamp: Date.now() }]
-          })
+          appendChatMessage({ role: 'assistant', content, timestamp: Date.now() })
           if (replySignalsPlanReady(content)) setPlanReady(true)
+          if (replySignalsBuildHandoff(content)) {
+            scheduleVoiceBuild('Grok handed off to the builder — watch the preview panel.')
+          }
         }
       },
       onError: (err) => {
@@ -1264,7 +1304,7 @@ export default function App() {
     setGrokLive(true)
     setHideSimBanner(true)
     toast.success('Grok Voice live — talk to Grok')
-  }, [stopVoice, grokVoiceId])
+  }, [appendChatMessage, scheduleVoiceBuild, stopVoice, grokVoiceId])
 
   /** Browser STT + TTS fallback when realtime voice token unavailable */
   const startBrowserVoice = useCallback(async () => {

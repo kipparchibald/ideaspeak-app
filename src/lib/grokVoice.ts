@@ -54,10 +54,12 @@ Job this call:
 - Never parrot their idea back at them
 - Lead with an opinion, then one sharp question
 - Lock: who it's for, daily core loop, wow moment, what to cut
-- When the plan is solid, say they can say "build it" for a live preview on screen
-- Do not claim you already pushed code or deployed
+- When the plan is solid, tell them you're handing off to the builder and they should watch the live preview on screen — the app builds automatically when you say that
+- Do not claim you already pushed code or deployed unless the preview is visibly building
 
-If they say "build it" / "let's build" / "go ahead and build", confirm you'll hand off to the builder for a live preview and keep the vibe high.`
+If they say "build it" / "let's build" / "go ahead and build", confirm you're handing off to the builder and they should watch the preview.
+
+When YOU decide the plan is ready (without them saying build), say clearly: "Handing off to the builder — watch the preview." That triggers the build.`
 
 export class GrokVoiceAgent {
   private ws: WebSocket | null = null
