@@ -307,95 +307,9 @@ function sanitizeBuildTalk(text: string): string {
 
 const WAVE_DELAYS = ['0s', '0.08s', '0.16s', '0.24s', '0.32s', '0.4s', '0.32s', '0.24s', '0.16s', '0.08s']
 
-interface SandpackWorkspaceProps {
-  previewRevision: number
-  workspaceTab: WorkspaceTab
-  hasBuilt: boolean
-  generatedFiles: GeneratedFiles
-  visibleSandpackFiles: string[]
-  appTsxLength: number
-}
-
-const SandpackWorkspace = lazy(async () => {
-  const [
-    { SandpackProvider, SandpackLayout, SandpackCodeEditor, SandpackPreview, SandpackFileExplorer },
-    { sandpackDark },
-  ] = await Promise.all([
-    import('@codesandbox/sandpack-react'),
-    import('@codesandbox/sandpack-themes'),
-  ])
-
-  function SandpackWorkspaceInner({
-    previewRevision,
-    workspaceTab,
-    hasBuilt,
-    generatedFiles,
-    visibleSandpackFiles,
-    appTsxLength,
-  }: SandpackWorkspaceProps) {
-    return (
-      <div className="absolute inset-0 h-full w-full min-h-0">
-      <SandpackProvider
-        key={`sp-${previewRevision}-${workspaceTab}-${hasBuilt}-${appTsxLength}`}
-        template="react-ts"
-        theme={sandpackDark}
-        files={generatedFiles}
-        className="!h-full !min-h-0"
-        options={{
-          activeFile: 'src/App.tsx',
-          visibleFiles: visibleSandpackFiles,
-          recompileMode: 'immediate',
-          recompileDelay: 80,
-          autorun: true,
-          autoReload: true,
-          initMode: 'immediate',
-        }}
-        customSetup={{
-          dependencies: {
-            react: '^18.2.0',
-            'react-dom': '^18.2.0',
-          },
-          entry: '/src/main.tsx',
-        }}
-      >
-        {workspaceTab === 'preview' ? (
-          <div className="h-full flex flex-col">
-            <div className="shrink-0 flex items-center justify-center gap-1.5 py-2 border-b border-[#14141c]">
-              <span className="w-2 h-2 rounded-full bg-[#ff5f57]" />
-              <span className="w-2 h-2 rounded-full bg-[#febc2e]" />
-              <span className="w-2 h-2 rounded-full bg-[#28c840]" />
-              <span className="ml-2 text-[10px] text-[#3a3a45] font-medium tracking-wide">
-                LIVE PREVIEW
-              </span>
-            </div>
-            <SandpackLayout style={{ height: '100%', flex: 1, border: 'none', borderRadius: 0 }}>
-              <SandpackPreview
-                style={{ height: '100%', flex: 1, minHeight: 0 }}
-                showOpenInCodeSandbox={false}
-                showRefreshButton
-                showNavigator={false}
-                showOpenNewtab={false}
-              />
-            </SandpackLayout>
-          </div>
-        ) : (
-          <SandpackLayout style={{ height: '100%', border: 'none', borderRadius: 0 }}>
-            <SandpackFileExplorer style={{ minWidth: 140, maxWidth: 180 }} />
-            <SandpackCodeEditor
-              showTabs
-              showLineNumbers
-              closableTabs
-              style={{ flex: 1, height: '100%' }}
-            />
-          </SandpackLayout>
-        )}
-      </SandpackProvider>
-      </div>
-    )
-  }
-
-  return { default: SandpackWorkspaceInner }
-})
+const PreviewEditWorkspace = lazy(() =>
+  import('./components/PreviewEditWorkspace').then((m) => ({ default: m.PreviewEditWorkspace })),
+)
 
 function SandpackLoadingFallback() {
   return (
@@ -631,16 +545,27 @@ export default function App() {
     sandboxIdRef.current = sandboxId
   }, [sandboxId])
 
+  const localPreviewBootedRef = useRef(false)
+  useEffect(() => {
+    localPreviewBootedRef.current = false
+  }, [previewEngine, previewRevision])
+
   useEffect(() => {
     if (previewEngine !== 'local' || !hasBuilt) return
 
     let cancelled = false
+    const isInitialBoot = !localPreviewBootedRef.current
+    const debounceMs = isInitialBoot ? 0 : 550
+
     const bootLocal = async () => {
-      setLocalPreviewLoading(true)
-      setLocalPreviewStatus('Starting localhost Vite preview…')
+      if (isInitialBoot) {
+        setLocalPreviewLoading(true)
+        setLocalPreviewStatus('Starting localhost Vite preview…')
+      }
       try {
         const session = await syncLocalPreview(generatedFiles)
         if (cancelled) return
+        localPreviewBootedRef.current = true
         setLocalPreviewUrl(session.previewUrl)
         setLocalPreviewStatus(
           session.ready ? '' : session.error || 'Waiting for Vite on :5174…',
@@ -657,32 +582,43 @@ export default function App() {
           description: `${msg} — Sandpack fallback`,
         })
       } finally {
-        if (!cancelled) setLocalPreviewLoading(false)
+        if (!cancelled && isInitialBoot) setLocalPreviewLoading(false)
       }
     }
 
-    void bootLocal()
+    const timer = window.setTimeout(() => void bootLocal(), debounceMs)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [previewEngine, hasBuilt, previewRevision, generatedFiles])
+
+  const sandboxBootedRef = useRef(false)
+  useEffect(() => {
+    sandboxBootedRef.current = false
+  }, [previewEngine, previewRevision])
 
   useEffect(() => {
     if (previewEngine !== 'sandbox' || !hasBuilt || !e2bAvailable) return
 
     let cancelled = false
     const projectId = projectIdRef.current
+    const existingId = sandboxIdRef.current
+    const isFileSync = !!existingId && sandboxBootedRef.current
+    const debounceMs = isFileSync ? 650 : 0
 
     const bootSandbox = async () => {
-      setSandboxLoading(true)
-      setSandboxStatus('Creating cloud sandbox…')
+      if (!isFileSync) {
+        setSandboxLoading(true)
+        setSandboxStatus(existingId ? 'Syncing files to sandbox…' : 'Creating cloud sandbox…')
+      }
       try {
-        const existingId = sandboxIdRef.current
         if (existingId) {
-          setSandboxStatus('Syncing files to sandbox…')
+          if (!isFileSync) setSandboxStatus('Syncing files to sandbox…')
           await syncSandboxFiles(existingId, generatedFiles)
           const url = await waitForSandboxReady(existingId, { timeoutMs: 45_000 })
           if (!cancelled) {
+            sandboxBootedRef.current = true
             setSandboxPreviewUrl(url)
             setSandboxStatus(url ? '' : 'Waiting for Vite dev server…')
           }
@@ -714,6 +650,7 @@ export default function App() {
         const url =
           session.previewUrl || (await waitForSandboxReady(session.sandboxId))
         if (!cancelled) {
+          sandboxBootedRef.current = true
           setSandboxPreviewUrl(url)
           if (!url) {
             setSandboxStatus('Sandbox timed out — check server logs')
@@ -731,13 +668,14 @@ export default function App() {
           toast.message('Using in-browser preview', { description: msg })
         }
       } finally {
-        if (!cancelled) setSandboxLoading(false)
+        if (!cancelled && !isFileSync) setSandboxLoading(false)
       }
     }
 
-    void bootSandbox()
+    const timer = window.setTimeout(() => void bootSandbox(), debounceMs)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [previewEngine, hasBuilt, e2bAvailable, previewRevision, generatedFiles])
 
@@ -1836,6 +1774,31 @@ export default function App() {
     (f) => f.endsWith('.tsx') || f.endsWith('.css') || f.endsWith('.ts') || f === 'package.json',
   )
 
+  const previewFilesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handlePreviewFilesChange = useCallback((files: GeneratedFiles) => {
+    if (previewFilesDebounceRef.current) clearTimeout(previewFilesDebounceRef.current)
+    previewFilesDebounceRef.current = setTimeout(() => {
+      setGeneratedFiles(files)
+    }, 600)
+  }, [])
+
+  const localPreviewSrc =
+    previewEngine === 'local' && hasBuilt && (localPreviewUrl || isLocalPreviewHost())
+      ? localPreviewIframeSrc(
+          localPreviewUrl
+            ? {
+                previewUrl: localPreviewUrl,
+                proxyPath: '/preview/',
+                ready: true,
+                port: 5174,
+              }
+            : null,
+        )
+      : null
+
+  const sandboxPreviewSrc =
+    previewEngine === 'sandbox' && hasBuilt && sandboxPreviewUrl ? sandboxPreviewUrl : null
+
   const projectCount = listWorkspaces().length
 
   const saveCurrentProject = useCallback(() => {
@@ -2747,57 +2710,31 @@ export default function App() {
                 </div>
               )}
 
-              {workspaceTab === 'preview' &&
-              previewEngine === 'local' &&
-              hasBuilt &&
-              (localPreviewUrl || isLocalPreviewHost()) ? (
-                <iframe
-                  key={`local-${previewRevision}-${localPreviewUrl || 'proxy'}`}
-                  src={localPreviewIframeSrc(
-                    localPreviewUrl
-                      ? {
-                          previewUrl: localPreviewUrl,
-                          proxyPath: '/preview/',
-                          ready: true,
-                          port: 5174,
-                        }
-                      : null,
-                  )}
-                  title="Localhost live preview"
-                  className="w-full h-full border-0 bg-[#0a0a0f]"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              {previewEngine === 'sandbox' &&
+                hasBuilt &&
+                workspaceTab === 'preview' &&
+                !sandboxPreviewUrl &&
+                !sandboxLoading && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 p-6 text-center pointer-events-none">
+                    <p className="text-[14px] font-semibold text-[#e8e8f0]">Sandbox preview unavailable</p>
+                    <p className="text-[12px] text-[#666] max-w-sm">
+                      {sandboxStatus || 'Set E2B_API_KEY on the server and try again.'}
+                    </p>
+                  </div>
+                )}
+              <Suspense fallback={<SandpackLoadingFallback />}>
+                <PreviewEditWorkspace
+                  previewRevision={previewRevision}
+                  workspaceTab={workspaceTab}
+                  hasBuilt={hasBuilt}
+                  files={generatedFiles}
+                  visibleFiles={visibleSandpackFiles}
+                  previewEngine={previewEngine}
+                  onFilesChange={handlePreviewFilesChange}
+                  localPreviewSrc={localPreviewSrc}
+                  sandboxPreviewSrc={sandboxPreviewSrc}
                 />
-              ) : previewEngine === 'sandbox' && hasBuilt && workspaceTab === 'preview' ? (
-                sandboxPreviewUrl ? (
-                  <iframe
-                    key={sandboxPreviewUrl}
-                    src={sandboxPreviewUrl}
-                    title="E2B sandbox preview"
-                    className="w-full h-full border-0 bg-[#0a0a0f]"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                  />
-                ) : (
-                  !sandboxLoading && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
-                      <p className="text-[14px] font-semibold text-[#e8e8f0]">Sandbox preview unavailable</p>
-                      <p className="text-[12px] text-[#666] max-w-sm">
-                        {sandboxStatus || 'Set E2B_API_KEY on the server and try again.'}
-                      </p>
-                    </div>
-                  )
-                )
-              ) : (
-                <Suspense fallback={<SandpackLoadingFallback />}>
-                  <SandpackWorkspace
-                    previewRevision={previewRevision}
-                    workspaceTab={workspaceTab}
-                    hasBuilt={hasBuilt}
-                    generatedFiles={generatedFiles}
-                    visibleSandpackFiles={visibleSandpackFiles}
-                    appTsxLength={(generatedFiles['src/App.tsx'] || '').length}
-                  />
-                </Suspense>
-              )}
+              </Suspense>
             </div>
           </section>
         )}
