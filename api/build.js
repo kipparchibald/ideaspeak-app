@@ -1,11 +1,9 @@
 import { BUILD_SYSTEM } from './build-prompt.js'
-import { getApiKey, parseJsonFromContent } from './xai.js'
+import { buildModelRequestBody, getApiKey, MODELS, parseJsonFromContent } from './xai.js'
 import { corsHeaders, isAllowedOrigin, rejectRateLimitedNode } from './security.js'
 
-/** Node runtime — grok-build needs >60s; Edge times out */
+/** Node runtime — Grok 4.5 build can take 60–90s; Edge times out */
 export const config = { maxDuration: 120 }
-
-const MODEL = 'grok-build-0.1'
 
 export default async function handler(req, res) {
   const cors = corsHeaders(req)
@@ -50,15 +48,16 @@ export default async function handler(req, res) {
     const upstream = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: BUILD_SYSTEM + personalityNote },
-          { role: 'user', content: user },
-        ],
-        temperature: 0.55,
-        max_tokens: 5000,
-      }),
+      body: JSON.stringify(
+        buildModelRequestBody({
+          messages: [
+            { role: 'system', content: BUILD_SYSTEM + personalityNote },
+            { role: 'user', content: user },
+          ],
+          maxTokens: 8000,
+          temperature: 0.55,
+        }),
+      ),
     })
 
     const data = await upstream.json()
@@ -69,7 +68,7 @@ export default async function handler(req, res) {
 
     const content = data.choices?.[0]?.message?.content || ''
     const parsed = parseJsonFromContent(content)
-    return res.status(200).json({ content, parsed })
+    return res.status(200).json({ content, parsed, model: MODELS.build })
   } catch (e) {
     return res.status(500).json({ error: e?.message || 'Build failed' })
   }

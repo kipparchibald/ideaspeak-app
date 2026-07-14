@@ -32,7 +32,7 @@ try {
 const XAI_API = 'https://api.x.ai/v1/chat/completions'
 const XAI_REALTIME_SECRETS = 'https://api.x.ai/v1/realtime/client_secrets'
 const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-3'
-const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-build-0.1'
+const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-4.5'
 
 type FeatureFlags = {
   xai: boolean
@@ -106,17 +106,21 @@ async function callXaiProxy(
   messages: any[],
   apiKey: string,
   model = CHAT_MODEL,
-  opts: { temperature?: number; maxTokens?: number } = {},
+  opts: { temperature?: number; maxTokens?: number; reasoningEffort?: string } = {},
 ) {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.85,
+    max_tokens: opts.maxTokens ?? 800,
+  }
+  if (opts.reasoningEffort && String(model).includes('grok-4')) {
+    body.reasoning_effort = opts.reasoningEffort
+  }
   const res = await fetch(XAI_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: opts.temperature ?? 0.85,
-      max_tokens: opts.maxTokens ?? 800,
-    }),
+    body: JSON.stringify(body),
   })
   const data = await res.json()
   if (!res.ok) {
@@ -395,7 +399,7 @@ const server = serve({
           [{ role: 'system', content: BUILD_SYSTEM + personalityNote }, { role: 'user', content: user }],
           apiKey,
           BUILD_MODEL,
-          { temperature: 0.55, maxTokens: 5000 },
+          { temperature: 0.55, maxTokens: 8000, reasoningEffort: 'low' },
         )
         let parsed = parseJsonFromContent(content)
         if (parsed?.files && typeof parsed.files === 'object') {

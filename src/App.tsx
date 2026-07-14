@@ -26,7 +26,7 @@ import {
   FolderOpen,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
-import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
+import { discussWithGrok, generateWithLLM } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import { verifyXaiKey, loadLocalXaiKey as loadKey } from './lib/api-verify'
 import { simulateVoiceRefiner } from './lib/build-tools'
@@ -864,7 +864,7 @@ export default function App() {
     setMobilePanel('app')
     setIsBuilding(true)
     setBuildProgress({
-      headline: 'Voice handoff — compiling your plan into a live preview…',
+      headline: 'Grok 4.5 is building your live preview…',
       phase: 'working',
       log: [
         {
@@ -1151,10 +1151,12 @@ export default function App() {
       let source: 'grok' | 'local' = 'local'
       let name = String(brief.vision || idea).split(/[.!\n]/)[0].slice(0, 48).trim() || 'Your app'
 
+      const buildModel = 'grok-4.5'
       const progress = beginBuildProgress(
         'plan',
         {
           grokLive: grokLive || !!key,
+          buildModel: key ? buildModel : undefined,
           projectName: name,
           vision: String(brief.vision || idea).slice(0, 200),
           v1Features: Array.isArray(brief.keyFeatures) ? (brief.keyFeatures as string[]) : undefined,
@@ -1165,33 +1167,43 @@ export default function App() {
       progress.logBuildRequest()
       progress.startTicker()
 
-      let upgradeDone: Promise<void> | null = null
-
-      try {
-        progress.note('Parsing collaborative plan from voice session…', 'Voice Refiner')
-        progress.note(`Brief: ${String(brief.vision || idea).slice(0, 96)}…`, 'Architect')
-
-        const themed = buildWorldClassPreview({
-          vision: String(brief.vision || idea),
-          original: idea,
-          keyFeatures: Array.isArray(brief.keyFeatures)
-            ? (brief.keyFeatures as string[])
-            : undefined,
+      const persistBuilt = (merged: Record<string, string>, builtName: string, builtPlan: string) => {
+        void persistAndSyncSnapshot({
+          workspaceId: activeWorkspaceId,
+          messages: history,
+          mode: 'build',
+          planReady: true,
+          hasBuilt: true,
+          generatedFiles: merged,
+          lastBuiltName: builtName,
+          lastBuildPlan: builtPlan,
           personality,
+        }).then((saved) => {
+          if (saved) setProjectsRevision((n) => n + 1)
         })
-        name = themed.name || name
-        progress.logFiles(themed.files)
-        const merged = mergeProjectFiles(themed.files)
+      }
+
+      const mountPreview = (
+        files: Record<string, string>,
+        builtName: string,
+        builtPlan: string,
+        src: 'grok' | 'local',
+        toastDetail: string,
+        usedGrok: boolean,
+      ) => {
+        const merged = mergeProjectFiles(files)
+        name = builtName
+        plan = builtPlan
+        source = src
+        progress.logFiles(files)
         setGeneratedFiles(merged)
         setPreviewRevision((n) => n + 1)
-        voicePairRef.current?.setNarration(
-          `Wrote ${Object.keys(themed.files).length} preview files`,
-          { speak: true },
-        )
+        voicePairRef.current?.setNarration(`Wrote ${Object.keys(files).length} preview files`, {
+          speak: true,
+        })
         setLastBuiltName(name)
         setLastBuildPlan(plan)
         revealLivePreview()
-        setIsBuilding(false)
         setWorkspaceTab('preview')
         recordUsage('build')
         setUsageTick((n) => n + 1)
@@ -1201,86 +1213,62 @@ export default function App() {
             : 'Sandpack preview mounted — check the right panel',
           'Engineer',
         )
-        void persistAndSyncSnapshot({
-          workspaceId: activeWorkspaceId,
-          messages: history,
-          mode: 'build',
-          planReady: true,
-          hasBuilt: true,
-          generatedFiles: merged,
-          lastBuiltName: name,
-          lastBuildPlan: plan,
-          personality,
-        }).then((saved) => {
-          if (saved) setProjectsRevision((n) => n + 1)
-        })
-        void progress.complete(name, false)
-        toast.success('Live preview ready', {
-          description: `${themed.kind} experience · click around on the right`,
-        })
+        persistBuilt(merged, name, plan)
+        void progress.complete(name, usedGrok)
+        toast.success('Live preview ready', { description: toastDetail })
+      }
+
+      try {
+        progress.note('Parsing collaborative plan from voice session…', 'Voice Refiner')
+        progress.note(`Brief: ${String(brief.vision || idea).slice(0, 96)}…`, 'Architect')
+        setWorkspaceTab('preview')
 
         if (key) {
-          upgradeDone = (async () => {
-            setIsUpgrading(true)
-            progress.note('Optional Grok upgrade — richer components…', 'Builder')
-            try {
-              const refined = await Promise.race([
-                runIdeaSpeakAgent(idea, history, key),
-                new Promise<null>((r) => setTimeout(() => r(null), 12000)),
-              ])
-              if (refined?.brief) {
-                brief = { ...(refined.brief as Record<string, unknown>), original: idea }
-                if (refined.plan) plan = sanitizeBuildTalk(refined.plan)
-                progress.note('Agent brief refined', 'Voice Refiner')
-              }
-              const llmResult = await Promise.race([
-                generateWithLLM(idea, brief, key, personality),
-                new Promise<null>((r) => setTimeout(() => r(null), 45000)),
-              ])
-              if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
-                const candidate = mergeProjectFiles(
-                  toSandpackFiles(llmResult.files as GeneratedFiles),
-                )
-                if (isRunnableSandpackApp(candidate)) {
-                  progress.logFiles(llmResult.files as Record<string, { code: string } | string>)
-                  setGeneratedFiles(candidate)
-                  name = llmResult.name || name
-                  if (llmResult.plan) plan = sanitizeBuildTalk(llmResult.plan)
-                  setLastBuiltName(name)
-                  setLastBuildPlan(plan)
-                  source = 'grok'
-                  setPreviewRevision((n) => n + 1)
-                  progress.note('Grok upgrade applied to preview', 'Builder')
-                  void persistAndSyncSnapshot({
-                    workspaceId: activeWorkspaceId,
-                    messages: history,
-                    mode: 'build',
-                    planReady: true,
-                    hasBuilt: true,
-                    generatedFiles: candidate,
-                    lastBuiltName: name,
-                    lastBuildPlan: plan,
-                    personality,
-                  }).then((saved) => {
-                    if (saved) setProjectsRevision((n) => n + 1)
-                  })
-                  toast.success('Preview upgraded', { description: `${name} · Grok build` })
-                } else {
-                  progress.note('Grok upgrade skipped — keeping working local preview', 'Builder')
-                }
-              } else {
-                progress.note('Grok upgrade skipped — local scaffold is live', 'Builder')
-              }
-            } catch (e) {
-              console.warn('Grok upgrade skipped', e)
-              progress.note('Grok upgrade skipped — local preview still live', 'Builder')
-            } finally {
-              setIsUpgrading(false)
+          progress.note(`${buildModel} is building your live preview…`, 'Builder')
+          const llmResult = await Promise.race([
+            generateWithLLM(idea, brief, key, personality),
+            new Promise<null>((r) => setTimeout(() => r(null), 90_000)),
+          ])
+          if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
+            const candidate = mergeProjectFiles(
+              toSandpackFiles(llmResult.files as GeneratedFiles),
+            )
+            if (isRunnableSandpackApp(candidate)) {
+              const builtPlan = sanitizeBuildTalk(llmResult.plan || plan)
+              mountPreview(
+                candidate,
+                llmResult.name || name,
+                builtPlan,
+                'grok',
+                `${llmResult.name || name} · ${buildModel}`,
+                true,
+              )
+              return { plan: builtPlan, name: llmResult.name || name, source: 'grok' as const }
             }
-          })()
+            progress.note('Grok output was not runnable — falling back to instant scaffold…', 'Builder')
+          } else {
+            progress.note('Grok build timed out — falling back to instant scaffold…', 'Builder')
+          }
         }
 
-        return { plan, name, source }
+        const themed = buildWorldClassPreview({
+          vision: String(brief.vision || idea),
+          original: idea,
+          keyFeatures: Array.isArray(brief.keyFeatures)
+            ? (brief.keyFeatures as string[])
+            : undefined,
+          personality,
+        })
+        mountPreview(
+          themed.files,
+          themed.name || name,
+          plan,
+          'local',
+          `${themed.kind} experience · click around on the right`,
+          false,
+        )
+
+        return { plan, name: themed.name || name, source }
       } catch (e) {
         console.error(e)
         const fallback = buildWorldClassPreview({
@@ -1300,16 +1288,9 @@ export default function App() {
       } finally {
         buildInFlightRef.current = false
         setIsBuilding(false)
-        const finishProgress = () => {
-          endBuildProgress()
-          window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
-        }
-        if (upgradeDone) {
-          void upgradeDone.finally(finishProgress)
-        } else {
-          setIsUpgrading(false)
-          finishProgress()
-        }
+        setIsUpgrading(false)
+        endBuildProgress()
+        window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
       }
     },
     [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],

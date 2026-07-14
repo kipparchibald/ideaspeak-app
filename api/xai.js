@@ -5,7 +5,21 @@ import { jsonrepair } from 'jsonrepair'
 export const MODELS = {
   // Prefer fast chat models that accept max_tokens cleanly
   chat: process.env.XAI_CHAT_MODEL || 'grok-3',
-  build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
+  build: process.env.XAI_BUILD_MODEL || 'grok-4.5',
+}
+
+/** Chat Completions body for IdeaSpeak build — grok-4.x uses low reasoning for speed */
+export function buildModelRequestBody({ messages, maxTokens = 8000, temperature = 0.55 }) {
+  const body = {
+    model: MODELS.build,
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  }
+  if (String(MODELS.build).includes('grok-4')) {
+    body.reasoning_effort = 'low'
+  }
+  return body
 }
 
 function readHeaderKey(req) {
@@ -77,19 +91,14 @@ export async function chatCompletion(apiKey, {
   return { ok: res.ok, status: res.status, data }
 }
 
-export async function buildCompletion(apiKey, { messages, maxTokens = 8000, temperature = 0.6 }) {
+export async function buildCompletion(apiKey, { messages, maxTokens = 8000, temperature = 0.55 }) {
   const res = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: MODELS.build,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-    }),
+    body: JSON.stringify(buildModelRequestBody({ messages, maxTokens, temperature })),
   })
 
   const data = await res.json()
