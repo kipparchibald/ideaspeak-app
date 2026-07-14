@@ -74,6 +74,32 @@ create policy "Users read own usage"
 
 -- Inserts/updates for usage_daily should go through service role (Railway server).
 
+create or replace function public.increment_usage(
+  p_user_id uuid,
+  p_kind text,
+  p_date date default (timezone('utc', now())::date)
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.usage_daily (user_id, date, builds, ships, polish)
+  values (
+    p_user_id,
+    p_date,
+    case when p_kind = 'build' then 1 else 0 end,
+    case when p_kind = 'ship' then 1 else 0 end,
+    case when p_kind = 'polish' then 1 else 0 end
+  )
+  on conflict (user_id, date) do update set
+    builds = usage_daily.builds + case when p_kind = 'build' then 1 else 0 end,
+    ships = usage_daily.ships + case when p_kind = 'ship' then 1 else 0 end,
+    polish = usage_daily.polish + case when p_kind = 'polish' then 1 else 0 end;
+end;
+$$;
+
 -- ── Auto-create profile on signup ───────────────────────────────────────────
 create or replace function public.handle_new_user()
 returns trigger

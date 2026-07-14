@@ -27,8 +27,14 @@ export function AccountPanel() {
       return
     }
 
-    void getSupabaseUser().then(setUser)
-    return onSupabaseAuthStateChange(setUser)
+    const syncUser = (u: User | null) => {
+      setUser(u)
+      if (typeof window !== 'undefined') {
+        ;(window as unknown as { __ideaspeakUserId?: string }).__ideaspeakUserId = u?.id
+      }
+    }
+    void getSupabaseUser().then(syncUser)
+    return onSupabaseAuthStateChange(syncUser)
   }, [])
 
   async function handleMagicLink() {

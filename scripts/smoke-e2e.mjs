@@ -113,6 +113,18 @@ if (RUN_SECURITY) {
     async () => probeRateLimitHeaders(API),
     { optional: true },
   )
+
+  await step('Security: usage API returns JSON', async () => {
+    const res = await fetch(`${API}/api/usage`, {
+      headers: {
+        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+      },
+      signal: AbortSignal.timeout(10_000),
+    })
+    const data = await res.json()
+    if (!data.limits || !data.usage) throw new Error('usage shape invalid')
+    return `authoritative=${!!data.authoritative} plan=${data.plan}`
+  })
 }
 
 await step(

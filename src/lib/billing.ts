@@ -254,7 +254,42 @@ export function recordUsage(kind: UsageKind) {
   const u = loadUsage()
   u[kind] = (u[kind] || 0) + 1
   saveUsage(u)
+  // Best-effort server record when signed in (authoritative when Supabase configured)
+  void recordUsageOnServer(kind).catch(() => {})
   return u
+}
+
+/** POST /api/usage — server-enforced when Supabase service key + user id present */
+export async function recordUsageOnServer(
+  kind: UsageKind,
+  userId?: string | null,
+): Promise<{ recorded: boolean }> {
+  const uid =
+    userId ||
+    (typeof window !== 'undefined'
+      ? (window as unknown as { __ideaspeakUserId?: string }).__ideaspeakUserId
+      : null)
+  if (!uid) return { recorded: false }
+  try {
+    const res = await fetch(billingApiBase('/api/usage'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, userId: uid }),
+    })
+    const data = await res.json().catch(() => ({}))
+    return { recorded: !!data.recorded }
+  } catch {
+    return { recorded: false }
+  }
+}
+
+export async function fetchServerUsage(userId?: string | null) {
+  const uid = userId || null
+  const headers: Record<string, string> = {}
+  if (uid) headers['X-User-Id'] = uid
+  const res = await fetch(billingApiBase('/api/usage'), { headers })
+  if (!res.ok) return null
+  return res.json()
 }
 
 let stripeConfiguredCache: boolean | null = null
