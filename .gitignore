@@ -24,5 +24,6 @@ dist-ssr
 *.sw?
 .vercel
 .smoke-artifacts
+.preview-runtime
 .env*
 config/in-house-setup.local

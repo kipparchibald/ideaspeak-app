@@ -504,6 +504,37 @@ Rules:
       return usageHandler(req)
     }
 
+    if (url.pathname === '/api/local-preview/sync' && req.method === 'POST') {
+      try {
+        const body = await req.json()
+        const files =
+          body.files && typeof body.files === 'object'
+            ? (body.files as Record<string, string>)
+            : {}
+        const { syncLocalPreview } = await import('./local-preview.js')
+        const result = await syncLocalPreview(files)
+        return Response.json(result, { headers })
+      } catch (e: any) {
+        return Response.json(
+          { error: e?.message || 'Local preview sync failed', ready: false },
+          { status: 500, headers },
+        )
+      }
+    }
+
+    if (url.pathname === '/api/local-preview/status' && req.method === 'GET') {
+      try {
+        const { getLocalPreviewStatus } = await import('./local-preview.js')
+        const status = await getLocalPreviewStatus()
+        return Response.json(status, { headers })
+      } catch (e: any) {
+        return Response.json(
+          { error: e?.message || 'Local preview status failed', ready: false },
+          { status: 500, headers },
+        )
+      }
+    }
+
     // ── Ship orchestrator (GitHub → Vercel → env → live) ───────────────────
     if (url.pathname === '/api/ship' && req.method === 'GET') {
       const jobId = url.searchParams.get('jobId')?.trim() || ''

@@ -22,6 +22,13 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      // Live preview iframe — real Vite app on :5174
+      '/preview': {
+        target: 'http://localhost:5174',
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/preview/, ''),
+      },
     },
   },
   define: {

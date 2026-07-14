@@ -112,6 +112,11 @@ import {
   syncSandboxFiles,
   waitForSandboxReady,
 } from './lib/sandbox'
+import {
+  isLocalPreviewHost,
+  localPreviewIframeSrc,
+  syncLocalPreview,
+} from './lib/local-preview'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Mode = 'discuss' | 'build'
@@ -125,7 +130,12 @@ type VoiceStatus =
   | 'speaking'
   | 'error'
 type WorkspaceTab = 'preview' | 'code'
-type PreviewEngine = 'sandpack' | 'sandbox'
+type PreviewEngine = 'local' | 'sandpack' | 'sandbox'
+
+function defaultPreviewEngine(): PreviewEngine {
+  if (typeof window !== 'undefined' && isLocalPreviewHost()) return 'local'
+  return 'sandpack'
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -538,8 +548,11 @@ export default function App() {
   const [isBuilding, setIsBuilding] = useState(false)
   const [isUpgrading, setIsUpgrading] = useState(false)
   const [buildProgress, setBuildProgress] = useState<BuildProgressSnapshot>(EMPTY_BUILD_PROGRESS)
-  const [previewEngine, setPreviewEngine] = useState<PreviewEngine>('sandpack')
+  const [previewEngine, setPreviewEngine] = useState<PreviewEngine>(defaultPreviewEngine)
   const [e2bAvailable, setE2bAvailable] = useState(false)
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null)
+  const [localPreviewLoading, setLocalPreviewLoading] = useState(false)
+  const [localPreviewStatus, setLocalPreviewStatus] = useState('')
   const [sandboxId, setSandboxId] = useState<string | null>(null)
   const [sandboxPreviewUrl, setSandboxPreviewUrl] = useState<string | null>(null)
   const [sandboxLoading, setSandboxLoading] = useState(false)
@@ -614,6 +627,42 @@ export default function App() {
   useEffect(() => {
     sandboxIdRef.current = sandboxId
   }, [sandboxId])
+
+  useEffect(() => {
+    if (previewEngine !== 'local' || !hasBuilt) return
+
+    let cancelled = false
+    const bootLocal = async () => {
+      setLocalPreviewLoading(true)
+      setLocalPreviewStatus('Starting localhost Vite preview…')
+      try {
+        const session = await syncLocalPreview(generatedFiles)
+        if (cancelled) return
+        setLocalPreviewUrl(session.previewUrl)
+        setLocalPreviewStatus(
+          session.ready ? '' : session.error || 'Waiting for Vite on :5174…',
+        )
+        if (!session.ready) {
+          setLocalPreviewStatus('Preview server warming up — retrying…')
+        }
+      } catch (e: unknown) {
+        if (cancelled) return
+        const msg = e instanceof Error ? e.message : 'Local preview failed'
+        setLocalPreviewStatus(msg)
+        setPreviewEngine('sandpack')
+        toast.message('Using in-browser preview', {
+          description: `${msg} — Sandpack fallback`,
+        })
+      } finally {
+        if (!cancelled) setLocalPreviewLoading(false)
+      }
+    }
+
+    void bootLocal()
+    return () => {
+      cancelled = true
+    }
+  }, [previewEngine, hasBuilt, previewRevision, generatedFiles])
 
   useEffect(() => {
     if (previewEngine !== 'sandbox' || !hasBuilt || !e2bAvailable) return
@@ -1166,7 +1215,12 @@ export default function App() {
         setWorkspaceTab('preview')
         recordUsage('build')
         setUsageTick((n) => n + 1)
-        progress.note('Sandpack preview mounted — check the right panel', 'Engineer')
+        progress.note(
+          isLocalPreviewHost()
+            ? 'Localhost preview at /preview — real Vite dev server in iframe'
+            : 'Sandpack preview mounted — check the right panel',
+          'Engineer',
+        )
         persistSessionSnapshot({
           workspaceId: activeWorkspaceId,
           messages: history,
@@ -2427,12 +2481,17 @@ export default function App() {
                     {VISION_REFINE_CHIP}
                   </button>
                 )}
-                {e2bAvailable && hasBuilt && (
+                {hasBuilt && (isLocalPreviewHost() || e2bAvailable) && (
                   <div className="hidden lg:flex items-center gap-1 p-0.5 rounded-lg bg-[#111116] border border-[#1f1f27]">
                     {(
                       [
-                        { id: 'sandpack' as PreviewEngine, label: 'Instant (Sandpack)' },
-                        { id: 'sandbox' as PreviewEngine, label: 'Real (Sandbox)' },
+                        ...(isLocalPreviewHost()
+                          ? [{ id: 'local' as PreviewEngine, label: 'Localhost' }]
+                          : []),
+                        { id: 'sandpack' as PreviewEngine, label: 'In-browser' },
+                        ...(e2bAvailable
+                          ? [{ id: 'sandbox' as PreviewEngine, label: 'Cloud VM' }]
+                          : []),
                       ] as const
                     ).map(({ id, label }) => (
                       <button
@@ -2456,13 +2515,17 @@ export default function App() {
                 <span className="hidden sm:inline text-[11px] text-[#444] truncate">
                   {isBuilding
                     ? 'Compiling preview…'
-                    : sandboxLoading
-                      ? sandboxStatus || 'Booting E2B sandbox…'
-                      : hasBuilt
-                        ? previewEngine === 'sandbox'
-                          ? `${Object.keys(generatedFiles).length} files · E2B VM`
-                          : `${Object.keys(generatedFiles).length} files · in-browser`
-                        : 'Waiting for first build'}
+                    : localPreviewLoading
+                      ? localPreviewStatus || 'Starting localhost Vite…'
+                      : sandboxLoading
+                        ? sandboxStatus || 'Booting E2B sandbox…'
+                        : hasBuilt
+                          ? previewEngine === 'local'
+                            ? `${Object.keys(generatedFiles).length} files · localhost:5174`
+                            : previewEngine === 'sandbox'
+                              ? `${Object.keys(generatedFiles).length} files · E2B VM`
+                              : `${Object.keys(generatedFiles).length} files · in-browser`
+                          : 'Waiting for first build'}
                 </span>
                 <button
                   type="button"
@@ -2611,6 +2674,15 @@ export default function App() {
                   Grok upgrading preview…
                 </div>
               )}
+              {localPreviewLoading && previewEngine === 'local' && !isBuilding && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#08080c]/90 backdrop-blur-md">
+                  <div className="w-10 h-10 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
+                  <p className="text-[14px] font-semibold text-[#00ff88]">Starting localhost preview…</p>
+                  <p className="text-[11px] text-[#555] max-w-xs text-center">
+                    {localPreviewStatus || 'Vite dev server on :5174'}
+                  </p>
+                </div>
+              )}
               {sandboxLoading && previewEngine === 'sandbox' && !isBuilding && (
                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#08080c]/90 backdrop-blur-md">
                   <div className="w-10 h-10 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
@@ -2620,13 +2692,33 @@ export default function App() {
                   </p>
                 </div>
               )}
-              {previewFlash && !isBuilding && !sandboxLoading && (
+              {previewFlash && !isBuilding && !sandboxLoading && !localPreviewLoading && (
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 rounded-full bg-[#00ff88] text-[#0a0a0f] text-[12px] font-bold shadow-lg shadow-[#00ff88]/30 pointer-events-none">
                   Live · interactive
                 </div>
               )}
 
-              {previewEngine === 'sandbox' && hasBuilt ? (
+              {workspaceTab === 'preview' &&
+              previewEngine === 'local' &&
+              hasBuilt &&
+              (localPreviewUrl || isLocalPreviewHost()) ? (
+                <iframe
+                  key={`local-${previewRevision}-${localPreviewUrl || 'proxy'}`}
+                  src={localPreviewIframeSrc(
+                    localPreviewUrl
+                      ? {
+                          previewUrl: localPreviewUrl,
+                          proxyPath: '/preview/',
+                          ready: true,
+                          port: 5174,
+                        }
+                      : null,
+                  )}
+                  title="Localhost live preview"
+                  className="w-full h-full border-0 bg-[#0a0a0f]"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              ) : previewEngine === 'sandbox' && hasBuilt && workspaceTab === 'preview' ? (
                 sandboxPreviewUrl ? (
                   <iframe
                     key={sandboxPreviewUrl}
