@@ -1522,6 +1522,10 @@ export default function App() {
           }
         }
       },
+      onReconnecting: () => {
+        setVoiceStatus('connecting')
+        toast.message('Reconnecting Grok Voice…', { duration: 2200 })
+      },
       onError: (err) => {
         console.warn('Grok Voice error:', err)
         toast.error('Grok Voice', { description: err })

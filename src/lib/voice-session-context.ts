@@ -24,21 +24,22 @@ function isDefaultOpener(content: string): boolean {
   return content.includes(DEFAULT_OPENER_SNIPPET)
 }
 
-/** Turns to seed into the realtime session (skip generic opener). */
+/** Light seed only — full history lives in instructions to avoid duplicate WS payloads. */
 export function voiceConversationSeed(
   messages: VoiceSessionContext['messages'],
-  maxTurns = 12,
+  maxTurns = 4,
 ): VoiceConversationTurn[] {
   const filtered = messages.filter(
     (m) => m.content.trim() && !(m.role === 'assistant' && isDefaultOpener(m.content)),
   )
+  if (filtered.length > 6) return []
   return filtered.slice(-maxTurns).map((m) => ({
     role: m.role,
-    content: m.content.trim().slice(0, 600),
+    content: m.content.trim().slice(0, 280),
   }))
 }
 
-function formatTranscript(messages: VoiceSessionContext['messages'], maxChars = 3200): string {
+function formatTranscript(messages: VoiceSessionContext['messages'], maxChars = 2400): string {
   const lines = messages
     .filter((m) => m.content.trim() && !(m.role === 'assistant' && isDefaultOpener(m.content)))
     .map((m) => `${m.role === 'user' ? 'Founder' : 'Grok'}: ${m.content.trim()}`)

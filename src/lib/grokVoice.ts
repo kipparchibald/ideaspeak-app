@@ -34,16 +34,16 @@ export interface GrokVoiceConversationTurn {
 export interface GrokVoiceOptions {
   voice?: VoiceId
   instructions?: string
-  /** Prior turns from History — seeded into realtime session on connect */
+  /** Prior turns — lightly seeded after session.updated (instructions carry most context) */
   conversationSeed?: GrokVoiceConversationTurn[]
-  /** Overrides default first greeting */
   greetingInstructions?: string
-  /** User speech transcript */
   onUserTranscript?: (text: string, isFinal: boolean) => void
-  /** Grok spoken reply as text (when available) */
   onAssistantTranscript?: (text: string, isFinal: boolean) => void
   onStateChange?: (state: GrokVoiceState) => void
+  /** Fatal — all retries exhausted */
   onError?: (err: string) => void
+  /** Transient issue; agent is retrying */
+  onReconnecting?: () => void
   /** @deprecated use onUserTranscript */
   onTranscript?: (text: string, isFinal: boolean) => void
 }
@@ -72,6 +72,24 @@ When YOU decide the plan is ready (without them saying build), say clearly: "Han
 
 Stay on this voice call through the build — you will announce when the preview is live. Never hand off to browser text-to-speech.`
 
+const CONNECT_RETRIES = 3
+const AUTO_RECONNECT_MAX = 5
+const TOKEN_TIMEOUT_MS = 12_000
+const SOCKET_TIMEOUT_MS = 22_000
+const SESSION_BOOT_FALLBACK_MS = 9_000
+const INSTRUCTIONS_MAX_CHARS = 6_800
+const VOICE_MODEL = 'grok-voice-latest'
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function isRecoverableVoiceError(msg: string): boolean {
+  return /conversation|item\.create|seed|transcription|whisper|tool|modalit|invalid.*session|too large|length/i.test(
+    msg,
+  )
+}
+
 export class GrokVoiceAgent {
   private ws: WebSocket | null = null
   private audioContext: AudioContext | null = null
@@ -85,8 +103,21 @@ export class GrokVoiceAgent {
   private assistantBuf = ''
   private userBuf = ''
   private nextPlayTime = 0
+
+  private wantsConnection = false
+  private intentionalDisconnect = false
   private conversationSeeded = false
-  private pendingBoot: (() => Promise<void>) | null = null
+  private greetingSent = false
+  private uplinkEnabled = false
+  private micBootstrapped = false
+  private pendingBoot: ((sendGreeting: boolean) => Promise<void>) | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private sessionBootTimer: ReturnType<typeof setTimeout> | null = null
+  private autoReconnectCount = 0
+  private onVisibilityBound: (() => void) | null = null
+  private pendingConnectResolve: (() => void) | null = null
+  private pendingConnectReject: ((e: Error) => void) | null = null
+  private pendingConnectFinish: ((fn: () => void) => void) | null = null
 
   constructor(opts: GrokVoiceOptions = {}) {
     this.opts = {
@@ -105,16 +136,26 @@ export class GrokVoiceAgent {
     return this.state
   }
 
+  private trimInstructions(text: string): string {
+    if (text.length <= INSTRUCTIONS_MAX_CHARS) return text
+    return (
+      text.slice(0, INSTRUCTIONS_MAX_CHARS) +
+      '\n\n[Earlier context truncated for voice stability — continue from recent thread.]'
+    )
+  }
+
   private buildSessionConfig() {
     return {
       voice: this.opts.voice || 'eve',
-      instructions: this.opts.instructions || IDEASPEAK_VOICE_INSTRUCTIONS,
+      instructions: this.trimInstructions(
+        this.opts.instructions || IDEASPEAK_VOICE_INSTRUCTIONS,
+      ),
       reasoning: { effort: 'none' as const },
       turn_detection: {
         type: 'server_vad' as const,
         threshold: 0.5,
         prefix_padding_ms: 333,
-        silence_duration_ms: 600,
+        silence_duration_ms: 700,
       },
       audio: {
         input: { format: { type: 'audio/pcm' as const, rate: 24000 } },
@@ -123,113 +164,196 @@ export class GrokVoiceAgent {
     }
   }
 
-  private async getEphemeralToken(): Promise<string> {
-    const res = await fetch('/api/voice/token', { method: 'POST' })
-    const data = await res.json().catch(() => ({} as Record<string, unknown>))
-    if (!res.ok) {
-      const err =
-        (typeof data.error === 'string' && data.error) ||
-        (typeof data.message === 'string' && data.message) ||
-        `Voice token failed (${res.status}). Is XAI_API_KEY set on the server?`
-      throw new Error(err)
-    }
-    const raw =
-      (data.client_secret as { value?: string } | undefined)?.value ||
-      (typeof data.value === 'string' ? data.value : '') ||
-      (typeof data.token === 'string' ? data.token : '') ||
-      (typeof data.client_secret === 'string' ? data.client_secret : '')
-    if (!raw) {
-      throw new Error('Voice token response missing client_secret')
-    }
-    return raw.startsWith('xai-client-secret.') ? raw.slice('xai-client-secret.'.length) : raw
+  private clearTimers() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    if (this.sessionBootTimer) clearTimeout(this.sessionBootTimer)
+    this.reconnectTimer = null
+    this.sessionBootTimer = null
   }
 
-  async connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) return
-    this.setState('connecting')
-    this.conversationSeeded = false
-    this.pendingBoot = null
+  private bindVisibilityResume() {
+    if (this.onVisibilityBound || typeof document === 'undefined') return
+    this.onVisibilityBound = () => {
+      if (document.visibilityState !== 'visible') return
+      void this.audioContext?.resume()
+      void this.playbackContext?.resume()
+    }
+    document.addEventListener('visibilitychange', this.onVisibilityBound)
+  }
 
-    try {
-      const token = await this.getEphemeralToken()
+  private unbindVisibilityResume() {
+    if (this.onVisibilityBound && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityBound)
+    }
+    this.onVisibilityBound = null
+  }
 
-      await new Promise<void>((resolve, reject) => {
-        let settled = false
-        const finish = (fn: () => void) => {
-          if (settled) return
-          settled = true
-          window.clearTimeout(timeout)
-          fn()
-        }
-
-        const ws = new WebSocket(
-          'wss://api.x.ai/v1/realtime?model=grok-voice-latest',
-          [`xai-client-secret.${token}`],
-        )
-        this.ws = ws
-        ws.binaryType = 'arraybuffer'
-
-        const timeout = window.setTimeout(() => {
-          finish(() => reject(new Error('Grok Voice connection timed out')))
-        }, 20_000)
-
-        this.pendingBoot = async () => {
-          await this.startMicrophone(this.opts.greetingInstructions)
-          finish(resolve)
-        }
-
-        ws.onopen = () => {
-          ws.send(
-            JSON.stringify({
-              type: 'session.update',
-              session: this.buildSessionConfig(),
-            }),
+  private async getEphemeralToken(): Promise<string> {
+    let lastErr = 'Voice token failed'
+    for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
+      try {
+        const res = await fetch('/api/voice/token', {
+          method: 'POST',
+          signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+        })
+        const data = await res.json().catch(() => ({} as Record<string, unknown>))
+        if (!res.ok) {
+          throw new Error(
+            (typeof data.error === 'string' && data.error) ||
+              (typeof data.message === 'string' && data.message) ||
+              `Voice token failed (${res.status})`,
           )
         }
+        const raw =
+          (data.client_secret as { value?: string } | undefined)?.value ||
+          (typeof data.value === 'string' ? data.value : '') ||
+          (typeof data.token === 'string' ? data.token : '') ||
+          (typeof data.client_secret === 'string' ? data.client_secret : '')
+        if (!raw) throw new Error('Voice token response missing client_secret')
+        return raw.startsWith('xai-client-secret.')
+          ? raw.slice('xai-client-secret.'.length)
+          : raw
+      } catch (e: unknown) {
+        lastErr = e instanceof Error ? e.message : String(e)
+        if (attempt < CONNECT_RETRIES - 1) await sleep(500 * (attempt + 1))
+      }
+    }
+    throw new Error(lastErr)
+  }
 
-        ws.onmessage = (e) => {
-          try {
-            if (typeof e.data === 'string') this.handleEvent(JSON.parse(e.data))
-          } catch {
-            /* ignore */
-          }
-        }
-
-        ws.onerror = () => {
-          finish(() => {
-            this.opts.onError?.('WebSocket error talking to Grok Voice')
-            this.setState('error')
-            reject(new Error('WebSocket error'))
-          })
-        }
-
-        ws.onclose = (ev) => {
-          this.cleanupMedia()
-          this.pendingBoot = null
-          if (!settled) {
-            finish(() =>
-              reject(
-                new Error(
-                  ev.reason?.trim() || `Grok Voice disconnected (code ${ev.code})`,
-                ),
-              ),
-            )
-            return
-          }
-          if (this.state !== 'idle' && this.state !== 'error') this.setState('idle')
-        }
-      })
-    } catch (err: unknown) {
+  private scheduleSessionBootFallback(sendGreeting: boolean) {
+    if (this.sessionBootTimer) clearTimeout(this.sessionBootTimer)
+    this.sessionBootTimer = setTimeout(() => {
+      if (!this.pendingBoot) return
+      const boot = this.pendingBoot
       this.pendingBoot = null
-      this.setState('error')
-      const msg = err instanceof Error ? err.message : 'Failed to connect to Grok Voice'
-      this.opts.onError?.(msg)
-      throw err
+      void boot(sendGreeting)
+        .then(() => this.pendingConnectFinish?.(() => this.pendingConnectResolve?.()))
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Microphone setup failed'
+          this.pendingConnectFinish?.(() =>
+            this.pendingConnectReject?.(new Error(msg)),
+          )
+        })
+    }, SESSION_BOOT_FALLBACK_MS)
+  }
+
+  private async runBoot(sendGreeting: boolean) {
+    if (this.sessionBootTimer) {
+      clearTimeout(this.sessionBootTimer)
+      this.sessionBootTimer = null
+    }
+    await this.ensureMicrophone()
+    this.uplinkEnabled = true
+    this.setState('listening')
+    if (sendGreeting && !this.greetingSent) {
+      this.sendGreeting(this.opts.greetingInstructions)
+      this.greetingSent = true
     }
   }
 
-  private handleEvent(event: any) {
-    switch (event.type) {
+  private async openSocket(token: string, sendGreeting: boolean): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false
+      const finish = (fn: () => void) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(socketTimeout)
+        fn()
+      }
+
+      try {
+        this.ws?.close()
+      } catch {
+        /* ignore */
+      }
+
+      const ws = new WebSocket(`wss://api.x.ai/v1/realtime?model=${VOICE_MODEL}`, [
+        `xai-client-secret.${token}`,
+      ])
+      this.ws = ws
+      ws.binaryType = 'arraybuffer'
+
+      const socketTimeout = window.setTimeout(() => {
+        finish(() => reject(new Error('Grok Voice connection timed out')))
+      }, SOCKET_TIMEOUT_MS)
+
+      this.pendingConnectResolve = resolve
+      this.pendingConnectReject = reject
+      this.pendingConnectFinish = finish
+      this.pendingBoot = async (greet) => this.runBoot(greet)
+      this.scheduleSessionBootFallback(sendGreeting)
+
+      ws.onopen = () => {
+        ws.send(
+          JSON.stringify({
+            type: 'session.update',
+            session: this.buildSessionConfig(),
+          }),
+        )
+      }
+
+      ws.onmessage = (e) => {
+        try {
+          if (typeof e.data === 'string') this.handleEvent(JSON.parse(e.data), sendGreeting)
+        } catch {
+          /* ignore */
+        }
+      }
+
+      ws.onerror = () => {
+        finish(() => reject(new Error('WebSocket error talking to Grok Voice')))
+      }
+
+      ws.onclose = (ev) => {
+        this.uplinkEnabled = false
+        if (this.sessionBootTimer) {
+          clearTimeout(this.sessionBootTimer)
+          this.sessionBootTimer = null
+        }
+        this.pendingBoot = null
+
+        this.pendingConnectResolve = null
+        this.pendingConnectReject = null
+        this.pendingConnectFinish = null
+
+        if (!settled) {
+          finish(() =>
+            reject(new Error(ev.reason?.trim() || `Grok Voice disconnected (code ${ev.code})`)),
+          )
+          return
+        }
+
+        if (this.intentionalDisconnect || !this.wantsConnection) {
+          if (this.state !== 'idle' && this.state !== 'error') this.setState('idle')
+          return
+        }
+
+        if (this.autoReconnectCount < AUTO_RECONNECT_MAX) {
+          this.autoReconnectCount++
+          this.opts.onReconnecting?.()
+          this.setState('connecting')
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+          this.reconnectTimer = setTimeout(() => {
+            void this.reconnect(false).catch(() => {
+              /* reconnect handles fatal */
+            })
+          }, Math.min(1200 * this.autoReconnectCount, 6000))
+          return
+        }
+
+        this.failFatally('Voice call dropped — tap mic to reconnect')
+      }
+    })
+  }
+
+  private handleEvent(event: Record<string, unknown>, sendGreeting: boolean) {
+    const connectResolve = this.pendingConnectResolve
+    const connectReject = this.pendingConnectReject
+    const connectFinish = this.pendingConnectFinish
+    const type = String(event.type || '')
+
+    switch (type) {
       case 'session.created':
         break
 
@@ -241,11 +365,17 @@ export class GrokVoiceAgent {
         if (this.pendingBoot) {
           const boot = this.pendingBoot
           this.pendingBoot = null
-          void boot().catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : 'Microphone setup failed'
-            this.opts.onError?.(msg)
-            this.setState('error')
-          })
+          void boot(sendGreeting)
+            .then(() => {
+              connectFinish?.(() => connectResolve?.())
+              this.pendingConnectResolve = null
+              this.pendingConnectReject = null
+              this.pendingConnectFinish = null
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : 'Microphone setup failed'
+              connectFinish?.(() => connectReject?.(new Error(msg)))
+            })
         } else if (this.state === 'connecting') {
           this.setState('listening')
         }
@@ -259,10 +389,9 @@ export class GrokVoiceAgent {
         this.setState('thinking')
         break
 
-      // User transcripts (several event name variants across protocol versions)
       case 'conversation.item.input_audio_transcription.delta':
       case 'conversation.item.input_audio_transcription.updated': {
-        const t = event.delta || event.transcript || ''
+        const t = String(event.delta || event.transcript || '')
         if (t) {
           this.userBuf += t
           this.emitUser(this.userBuf, false)
@@ -270,7 +399,7 @@ export class GrokVoiceAgent {
         break
       }
       case 'conversation.item.input_audio_transcription.completed': {
-        const t = event.transcript || this.userBuf
+        const t = String(event.transcript || this.userBuf)
         this.userBuf = ''
         if (t) this.emitUser(t, true)
         break
@@ -281,29 +410,27 @@ export class GrokVoiceAgent {
         this.setState('thinking')
         break
 
-      // Assistant text (when provided alongside audio)
       case 'response.audio_transcript.delta':
       case 'response.output_audio_transcript.delta': {
-        const d = event.delta || ''
+        const d = String(event.delta || '')
         this.assistantBuf += d
         this.opts.onAssistantTranscript?.(this.assistantBuf, false)
         break
       }
       case 'response.audio_transcript.done':
       case 'response.output_audio_transcript.done': {
-        const t = event.transcript || this.assistantBuf
+        const t = String(event.transcript || this.assistantBuf)
         this.assistantBuf = ''
         if (t) this.opts.onAssistantTranscript?.(t, true)
         break
       }
 
-      // Audio from Grok
       case 'response.output_audio.delta':
       case 'response.audio.delta':
         this.setState('speaking')
         if (event.delta) {
           try {
-            const bytes = this.b64ToArrayBuffer(event.delta)
+            const bytes = this.b64ToArrayBuffer(String(event.delta))
             this.enqueueAudio(bytes)
           } catch {
             /* ignore bad chunk */
@@ -320,7 +447,6 @@ export class GrokVoiceAgent {
           this.opts.onAssistantTranscript?.(this.assistantBuf, true)
           this.assistantBuf = ''
         }
-        // Return to listening after audio drains
         void this.whenPlaybackIdle().then(() => {
           if (this.state === 'speaking' || this.state === 'thinking') {
             this.setState('listening')
@@ -329,17 +455,98 @@ export class GrokVoiceAgent {
         break
 
       case 'error': {
+        const errObj = event.error as { message?: string } | string | undefined
         const msg =
-          event.error?.message ||
-          event.message ||
-          (typeof event.error === 'string' ? event.error : '') ||
+          (typeof errObj === 'object' && errObj?.message) ||
+          (typeof event.message === 'string' ? event.message : '') ||
+          (typeof errObj === 'string' ? errObj : '') ||
           'Grok Voice error'
-        this.pendingBoot = null
-        this.opts.onError?.(msg)
-        this.setState('error')
+
+        if (isRecoverableVoiceError(msg)) {
+          this.conversationSeeded = true
+          if (this.pendingBoot) {
+            const boot = this.pendingBoot
+            this.pendingBoot = null
+            void boot(sendGreeting)
+              .then(() => connectFinish?.(() => connectResolve?.()))
+              .catch((err: unknown) => {
+                connectFinish?.(() =>
+                  connectReject?.(
+                    new Error(err instanceof Error ? err.message : 'Microphone setup failed'),
+                  ),
+                )
+              })
+          }
+          return
+        }
+
+        if (this.state === 'connecting' && connectReject && connectFinish) {
+          connectFinish(() => connectReject(new Error(msg)))
+          return
+        }
+
+        this.failFatally(msg)
         break
       }
     }
+  }
+
+  private failFatally(msg: string) {
+    this.pendingBoot = null
+    this.wantsConnection = false
+    this.clearTimers()
+    this.setState('error')
+    this.opts.onError?.(msg)
+  }
+
+  private async reconnect(sendGreeting: boolean) {
+    if (!this.wantsConnection || this.intentionalDisconnect) return
+    this.setState('connecting')
+    this.conversationSeeded = false
+    try {
+      const token = await this.getEphemeralToken()
+      await this.openSocket(token, sendGreeting)
+      this.autoReconnectCount = 0
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Reconnect failed'
+      if (this.autoReconnectCount < AUTO_RECONNECT_MAX) {
+        this.autoReconnectCount++
+        this.opts.onReconnecting?.()
+        this.reconnectTimer = setTimeout(() => {
+          void this.reconnect(false)
+        }, Math.min(1500 * this.autoReconnectCount, 8000))
+        return
+      }
+      this.failFatally(msg)
+    }
+  }
+
+  async connect(): Promise<void> {
+    if (this.ws?.readyState === WebSocket.OPEN && this.uplinkEnabled) return
+
+    this.wantsConnection = true
+    this.intentionalDisconnect = false
+    this.autoReconnectCount = 0
+    this.greetingSent = false
+    this.conversationSeeded = false
+    this.setState('connecting')
+    this.bindVisibilityResume()
+
+    let lastErr: Error | null = null
+    for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) this.opts.onReconnecting?.()
+        const token = await this.getEphemeralToken()
+        await this.openSocket(token, true)
+        return
+      } catch (e: unknown) {
+        lastErr = e instanceof Error ? e : new Error(String(e))
+        if (attempt < CONNECT_RETRIES - 1) await sleep(700 * (attempt + 1))
+      }
+    }
+
+    this.failFatally(lastErr?.message || 'Failed to connect to Grok Voice')
+    throw lastErr
   }
 
   private emitUser(text: string, isFinal: boolean) {
@@ -366,81 +573,101 @@ export class GrokVoiceAgent {
 
   private seedConversation(turns?: GrokVoiceConversationTurn[]) {
     if (!turns?.length || this.ws?.readyState !== WebSocket.OPEN) return
-    for (const turn of turns) {
+    for (const turn of turns.slice(-4)) {
       const role = turn.role === 'assistant' ? 'assistant' : 'user'
-      this.ws?.send(
-        JSON.stringify({
-          type: 'conversation.item.create',
-          item: {
-            type: 'message',
-            role,
-            content: [
-              { type: role === 'user' ? 'input_text' : 'output_text', text: turn.content },
-            ],
-          },
-        }),
-      )
+      const text = turn.content.trim().slice(0, 320)
+      if (!text) continue
+      try {
+        this.ws?.send(
+          JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role,
+              content: [
+                { type: role === 'user' ? 'input_text' : 'output_text', text },
+              ],
+            },
+          }),
+        )
+      } catch {
+        /* skip bad seed turn */
+      }
     }
   }
 
-  private async startMicrophone(greetingInstructions?: string) {
-    try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
+  private async ensureMicrophone() {
+    const streamActive = this.mediaStream?.getTracks().some((t) => t.readyState === 'live')
+    if (this.micBootstrapped && streamActive && this.scriptProcessor) return
+
+    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
+
+    if (!this.audioContext || this.audioContext.state === 'closed') {
       this.audioContext = new AudioContext({ sampleRate: 24000 })
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume()
+    }
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume()
+    }
+
+    if (this.scriptProcessor) {
+      try {
+        this.scriptProcessor.disconnect()
+      } catch {
+        /* ignore */
       }
+    }
 
-      const source = this.audioContext.createMediaStreamSource(this.mediaStream)
-      this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1)
+    const source = this.audioContext.createMediaStreamSource(this.mediaStream)
+    this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1)
 
-      this.scriptProcessor.onaudioprocess = (e) => {
-        if (this.ws?.readyState !== WebSocket.OPEN) return
-        // Mute uplink while Grok is talking to reduce echo
-        if (this.state === 'speaking') return
+    this.scriptProcessor.onaudioprocess = (e) => {
+      if (!this.uplinkEnabled || this.ws?.readyState !== WebSocket.OPEN) return
+      if (this.state === 'speaking') return
 
-        const float32 = e.inputBuffer.getChannelData(0)
-        const pcm16 = this.float32ToPcm16(float32)
-        const b64 = this.arrayBufferToB64(pcm16.buffer as ArrayBuffer)
+      const float32 = e.inputBuffer.getChannelData(0)
+      const pcm16 = this.float32ToPcm16(float32)
+      const b64 = this.arrayBufferToB64(pcm16.buffer as ArrayBuffer)
 
-        this.ws.send(
+      try {
+        this.ws?.send(
           JSON.stringify({
             type: 'input_audio_buffer.append',
             audio: b64,
           }),
         )
+      } catch {
+        /* ws may be closing */
       }
-
-      source.connect(this.scriptProcessor)
-      // Keep processor alive without feedback squeal
-      const mute = this.audioContext.createGain()
-      mute.gain.value = 0
-      this.scriptProcessor.connect(mute)
-      mute.connect(this.audioContext.destination)
-
-      this.setState('listening')
-
-      this.ws?.send(
-        JSON.stringify({
-          type: 'response.create',
-          response: {
-            instructions:
-              greetingInstructions ||
-              this.opts.greetingInstructions ||
-              'Greet briefly as Grok (one short sentence). Ask who the product is for and what they do every day. No corporate fluff.',
-          },
-        }),
-      )
-    } catch (err: any) {
-      this.opts.onError?.('Microphone access denied: ' + (err.message || err))
-      this.setState('error')
     }
+
+    source.connect(this.scriptProcessor)
+    const mute = this.audioContext.createGain()
+    mute.gain.value = 0
+    this.scriptProcessor.connect(mute)
+    mute.connect(this.audioContext.destination)
+
+    this.micBootstrapped = true
+  }
+
+  private sendGreeting(greetingInstructions?: string) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(
+      JSON.stringify({
+        type: 'response.create',
+        response: {
+          instructions:
+            greetingInstructions ||
+            this.opts.greetingInstructions ||
+            'Greet briefly as Grok (one short sentence). Ask who the product is for and what they do every day. No corporate fluff.',
+        },
+      }),
+    )
   }
 
   private float32ToPcm16(float32: Float32Array): Int16Array {
@@ -458,7 +685,7 @@ export class GrokVoiceAgent {
   }
 
   private async ensurePlaybackContext() {
-    if (!this.playbackContext) {
+    if (!this.playbackContext || this.playbackContext.state === 'closed') {
       this.playbackContext = new AudioContext({ sampleRate: 24000 })
     }
     if (this.playbackContext.state === 'suspended') {
@@ -522,7 +749,6 @@ export class GrokVoiceAgent {
     this.ws.send(JSON.stringify({ type: 'response.create' }))
   }
 
-  /** Speak as Grok without adding a user turn (build updates, preview ready, etc.) */
   speakLine(instructions: string) {
     if (this.ws?.readyState !== WebSocket.OPEN) return
     this.ws.send(
@@ -534,33 +760,37 @@ export class GrokVoiceAgent {
   }
 
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
+    return this.ws?.readyState === WebSocket.OPEN && this.uplinkEnabled
   }
 
-  private cleanupMedia() {
+  private cleanupMedia(full = true) {
+    this.uplinkEnabled = false
     try {
       this.scriptProcessor?.disconnect()
     } catch {
       /* ignore */
     }
-    try {
-      this.mediaStream?.getTracks().forEach((t) => t.stop())
-    } catch {
-      /* ignore */
-    }
-    try {
-      void this.audioContext?.close()
-    } catch {
-      /* ignore */
+    if (full) {
+      try {
+        this.mediaStream?.getTracks().forEach((t) => t.stop())
+      } catch {
+        /* ignore */
+      }
+      try {
+        void this.audioContext?.close()
+      } catch {
+        /* ignore */
+      }
+      this.scriptProcessor = null
+      this.mediaStream = null
+      this.audioContext = null
+      this.micBootstrapped = false
     }
     try {
       void this.playbackContext?.close()
     } catch {
       /* ignore */
     }
-    this.scriptProcessor = null
-    this.mediaStream = null
-    this.audioContext = null
     this.playbackContext = null
     this.audioQueue = []
     this.isPlayingAudio = false
@@ -568,9 +798,14 @@ export class GrokVoiceAgent {
   }
 
   disconnect() {
+    this.wantsConnection = false
+    this.intentionalDisconnect = true
     this.pendingBoot = null
     this.conversationSeeded = false
-    this.cleanupMedia()
+    this.greetingSent = false
+    this.clearTimers()
+    this.unbindVisibilityResume()
+    this.cleanupMedia(true)
     try {
       this.ws?.close()
     } catch {
