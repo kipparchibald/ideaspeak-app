@@ -59,7 +59,9 @@ Job this call:
 
 If they say "build it" / "let's build" / "go ahead and build", confirm you're handing off to the builder and they should watch the preview.
 
-When YOU decide the plan is ready (without them saying build), say clearly: "Handing off to the builder — watch the preview." That triggers the build.`
+When YOU decide the plan is ready (without them saying build), say clearly: "Handing off to the builder — watch the preview." That triggers the build.
+
+Stay on this voice call through the build — you will announce when the preview is live. Never hand off to browser text-to-speech.`
 
 export class GrokVoiceAgent {
   private ws: WebSocket | null = null
@@ -440,6 +442,24 @@ export class GrokVoiceAgent {
       }),
     )
     this.ws.send(JSON.stringify({ type: 'response.create' }))
+  }
+
+  /** Speak as Grok without adding a user turn (build updates, preview ready, etc.) */
+  speakLine(instructions: string) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(
+      JSON.stringify({
+        type: 'response.create',
+        response: {
+          modalities: ['audio', 'text'],
+          instructions,
+        },
+      }),
+    )
+  }
+
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
   }
 
   private cleanupMedia() {

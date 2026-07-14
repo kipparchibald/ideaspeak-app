@@ -75,6 +75,7 @@ import {
   type GrokVoiceState,
   type VoiceId,
 } from './lib/grokVoice'
+import { speak as speakGrokTts, type GrokVoiceId } from './lib/tts'
 import {
   starterPreviewFiles,
   sanitizePreviewFiles,
@@ -664,6 +665,8 @@ export default function App() {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const voiceBuildScheduledRef = useRef(false)
+  /** Keep realtime Grok Voice alive through handoff → build */
+  const voiceBuildHandoffRef = useRef(false)
 
   const appendChatMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
@@ -718,93 +721,48 @@ export default function App() {
     }
   }, [])
 
-  /** Prefer a natural English voice — browser default often sounds like a robot */
-  const pickVoice = useCallback(() => {
-    if (!window.speechSynthesis) return null
-    const voices = window.speechSynthesis.getVoices()
-    if (!voices.length) return null
-    const prefer = [
-      /samantha/i,
-      /karen/i,
-      /moira/i,
-      /google us english/i,
-      /microsoft (aria|jenny|guy)/i,
-      /natural/i,
-      /enhanced/i,
-    ]
-    for (const re of prefer) {
-      const v = voices.find((x) => re.test(x.name) && /en/i.test(x.lang))
-      if (v) return v
-    }
-    return (
-      voices.find((v) => v.lang === 'en-US') ||
-      voices.find((v) => /^en/i.test(v.lang)) ||
-      null
-    )
-  }, [])
-
-  const speak = useCallback(
-    (text: string, opts?: { force?: boolean }) => {
+  /** Grok Voice realtime when connected; else Grok TTS API — never browser robot during voice flows */
+  const narrate = useCallback(
+    async (
+      text: string,
+      opts?: { force?: boolean; preferRealtime?: boolean; voiceMode?: boolean },
+    ) => {
       if (!opts?.force && !ttsEnabled) return
-      if (!window.speechSynthesis) return
-      // Strip leftover bot cadence before speaking
       const clean = text
         .replace(/^(Perfect|Awesome|Great|Absolutely)[!.,]?\s*/i, '')
-        .slice(0, 280)
-      window.speechSynthesis.cancel()
-      const utt = new SpeechSynthesisUtterance(clean)
-      utt.rate = 1.08
-      utt.pitch = 0.95
-      const voice = pickVoice()
-      if (voice) utt.voice = voice
-      window.speechSynthesis.speak(utt)
-    },
-    [ttsEnabled, pickVoice],
-  )
+        .trim()
+      if (!clean) return
 
-  /** Await spoken line (used before mic listens so TTS isn't transcribed) */
-  const speakAndWait = useCallback(
-    (text: string): Promise<void> => {
-      return new Promise((resolve) => {
-        if (!window.speechSynthesis) {
-          resolve()
-          return
-        }
-        window.speechSynthesis.cancel()
-        // Chrome: voices often empty until this fires
-        const run = () => {
-          const utt = new SpeechSynthesisUtterance(text)
-          utt.rate = 1.08
-          utt.pitch = 0.95
-          const voice = pickVoice()
-          if (voice) utt.voice = voice
-          let done = false
-          const finish = () => {
-            if (done) return
-            done = true
-            resolve()
-          }
-          utt.onend = finish
-          utt.onerror = finish
-          window.speechSynthesis.speak(utt)
-          window.setTimeout(finish, 5000)
-        }
-        if (window.speechSynthesis.getVoices().length) run()
-        else {
-          window.speechSynthesis.onvoiceschanged = () => {
-            window.speechSynthesis.onvoiceschanged = null
-            run()
-          }
-          // fallback if event never fires
-          window.setTimeout(run, 200)
-        }
-      })
+      const agent = grokAgentRef.current
+      const useRealtime =
+        opts?.preferRealtime !== false &&
+        voiceActiveRef.current &&
+        agent?.isConnected()
+
+      if (useRealtime && agent) {
+        agent.speakLine(
+          `Say this naturally in one or two short spoken sentences as Grok: ${clean.slice(0, 320)}`,
+        )
+        return
+      }
+
+      try {
+        await speakGrokTts(clean, {
+          provider: 'grok',
+          voice: grokVoiceId as GrokVoiceId,
+          voiceMode: opts?.voiceMode,
+          raw: true,
+        })
+      } catch (err) {
+        console.warn('Grok TTS unavailable:', err)
+      }
     },
-    [pickVoice],
+    [ttsEnabled, grokVoiceId],
   )
 
   const stopVoice = useCallback(() => {
     voiceActiveRef.current = false
+    voiceBuildHandoffRef.current = false
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = null
@@ -854,17 +812,25 @@ export default function App() {
     (reason: string) => {
       if (voiceBuildScheduledRef.current || hasBuilt) return
       voiceBuildScheduledRef.current = true
+      voiceBuildHandoffRef.current = true
       setPlanReady(true)
       setMode('build')
       toast.message('Building your preview…', { description: reason })
+
+      const agent = grokAgentRef.current
+      if (agent?.isConnected()) {
+        agent.speakLine(
+          'Briefly tell the user you are kicking off the builder and they should watch the live preview on the right. One or two sentences, Grok voice, high energy.',
+        )
+      }
+
       window.setTimeout(() => {
-        stopVoice()
         void sendMessageRef.current('build it', 'build').finally(() => {
           voiceBuildScheduledRef.current = false
         })
-      }, 1400)
+      }, 1600)
     },
-    [hasBuilt, stopVoice],
+    [hasBuilt],
   )
 
   const stopVoicePair = useCallback(() => {
@@ -1108,7 +1074,15 @@ export default function App() {
 
       setInput('')
       setVoiceInterim('')
-      if (voiceActiveRef.current || voiceStatus === 'listening' || voiceStatus === 'prompting') {
+      const keepGrokVoice =
+        voiceBuildHandoffRef.current ||
+        (activeMode === 'build' && grokAgentRef.current?.isConnected() && voiceActiveRef.current)
+      if (
+        !keepGrokVoice &&
+        (voiceActiveRef.current ||
+          voiceStatus === 'listening' ||
+          voiceStatus === 'prompting')
+      ) {
         stopVoice()
       }
 
@@ -1168,8 +1142,10 @@ export default function App() {
             scheduleVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
 
-          // Always speak plan replies (especially after mic) — this is the collaboration
-          speak(reply, { force: fromVoice || ttsEnabled })
+          // Browser STT fallback only — realtime Grok Voice already spoke the reply
+          if (fromVoice && !grokAgentRef.current?.isConnected()) {
+            void narrate(reply, { force: true, voiceMode: true })
+          }
         } else {
           // Build from the full plan, not a single half-sentence
           const buildBrief = compilePlanBrief(nextHistory)
@@ -1183,10 +1159,15 @@ export default function App() {
             timestamp: Date.now(),
           }
           setMessages((prev) => [...prev, assistantMsg])
-          speak(
-            `${built.name || 'Your app'} is live in the preview. Tell me what to change, or open Ship when you're ready.`,
-            { force: fromVoice || ttsEnabled },
-          )
+          const doneLine = `${built.name || 'Your app'} is live in the preview. Tell me what to change, or open Ship when you're ready.`
+          if (voiceBuildHandoffRef.current || grokAgentRef.current?.isConnected()) {
+            grokAgentRef.current?.speakLine(
+              `Celebrate briefly — tell the user "${built.name || 'their app'}" is live in the preview on the right and they can click around or keep talking to refine. Two short sentences max.`,
+            )
+            voiceBuildHandoffRef.current = false
+          } else {
+            void narrate(doneLine, { force: fromVoice || ttsEnabled, voiceMode: true })
+          }
         }
       } catch (err) {
         if (err instanceof Error && err.message === 'PLAN_LIMIT') {
@@ -1217,7 +1198,7 @@ export default function App() {
       planReady,
       apiKey,
       personality,
-      speak,
+      narrate,
       ttsEnabled,
       voiceStatus,
       stopVoice,
@@ -1306,104 +1287,20 @@ export default function App() {
     toast.success('Grok Voice live — talk to Grok')
   }, [appendChatMessage, scheduleVoiceBuild, stopVoice, grokVoiceId])
 
-  /** Browser STT + TTS fallback when realtime voice token unavailable */
-  const startBrowserVoice = useCallback(async () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) {
-      toast.error('Voice needs Chrome/Edge, or a working Grok Voice server key')
-      return
-    }
-
-    voiceActiveRef.current = true
-    setVoiceStatus('prompting')
-    setVoiceInterim('')
-    await speakAndWait(
-      planReady
-        ? "Alright — refine more, or say build it."
-        : "Hey. Who's it for, and what do they do every day?",
-    )
-    if (!voiceActiveRef.current) {
-      setVoiceStatus('idle')
-      return
-    }
-
-    const recognition = new SR()
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.lang = 'en-US'
-    recognitionRef.current = recognition
-    setVoiceStatus('listening')
-
-    recognition.onresult = (e: any) => {
-      if (!voiceActiveRef.current) return
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      let final = ''
-      let interim = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const piece = e.results[i][0]?.transcript || ''
-        if (e.results[i].isFinal) final += piece
-        else interim += piece
-      }
-      if (final) {
-        setInput((prev) => (prev + ' ' + final).trim())
-        setVoiceInterim('')
-      } else setVoiceInterim(interim)
-      silenceTimerRef.current = setTimeout(() => {
-        if (!voiceActiveRef.current) return
-        stopVoice()
-        setInput((prev) => {
-          const text = prev.trim()
-          if (text) {
-            voiceTurnRef.current = true
-            void sendMessageRef.current(text)
-          }
-          return ''
-        })
-      }, 2000)
-    }
-
-    recognition.onerror = (e: any) => {
-      if (e?.error === 'aborted' || e?.error === 'no-speech') return
-      if (e?.error === 'not-allowed') {
-        toast.error('Microphone blocked')
-        stopVoice()
-        setVoiceStatus('error')
-      }
-    }
-
-    recognition.onend = () => {
-      if (!voiceActiveRef.current) {
-        setVoiceStatus('idle')
-        return
-      }
-      try {
-        recognition.start()
-      } catch {
-        stopVoice()
-      }
-    }
-
-    try {
-      recognition.start()
-    } catch {
-      stopVoice()
-      toast.error('Could not start microphone')
-    }
-  }, [speakAndWait, planReady, stopVoice])
-
   const startVoice = useCallback(async () => {
-    // Prefer real Grok Voice whenever server/key can issue a token
     try {
       await startGrokVoice()
-      return
-    } catch (e: any) {
-      console.warn('Grok Voice unavailable, browser fallback:', e)
-      toast.message('Grok Voice unavailable', {
-        description: 'Falling back to browser mic + speech. Fix server XAI_API_KEY for real Grok Voice.',
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not connect'
+      console.warn('Grok Voice unavailable:', e)
+      voiceActiveRef.current = false
+      setVoiceStatus('error')
+      toast.error('Grok Voice only', {
+        description: `${msg}. Ensure XAI_API_KEY is set on the server (localhost:3001 or Vercel).`,
+        duration: 8000,
       })
-      await startBrowserVoice()
     }
-  }, [startGrokVoice, startBrowserVoice])
+  }, [startGrokVoice])
 
   /** Tap once to start Grok Voice, tap again to hang up */
   const toggleVoice = useCallback(() => {
