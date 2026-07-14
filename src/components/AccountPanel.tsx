@@ -13,6 +13,7 @@ import {
   isSupabaseConfigured,
   onSupabaseAuthStateChange,
 } from '../lib/supabase'
+import { saveAllWorkspacesToCloud, syncWorkspacesFromCloud } from '../lib/projects'
 
 export function AccountPanel() {
   const [email, setEmail] = useState('')
@@ -31,6 +32,17 @@ export function AccountPanel() {
       setUser(u)
       if (typeof window !== 'undefined') {
         ;(window as unknown as { __ideaspeakUserId?: string }).__ideaspeakUserId = u?.id
+      }
+      if (u) {
+        void (async () => {
+          const pulled = await syncWorkspacesFromCloud()
+          if (pulled.ok && pulled.synced > 0) {
+            toast.message('Projects synced from cloud', {
+              description: `${pulled.synced} updated`,
+            })
+          }
+          await saveAllWorkspacesToCloud()
+        })()
       }
     }
     void getSupabaseUser().then(syncUser)

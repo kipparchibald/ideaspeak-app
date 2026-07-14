@@ -23,7 +23,7 @@ import {
   LayoutGrid,
   ScanEye,
   Users,
-  History,
+  FolderOpen,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
@@ -71,10 +71,12 @@ import {
 } from './lib/projects'
 import {
   isSubstantiveSession,
+  persistAndSyncSnapshot,
   persistSessionSnapshot,
   shouldRestoreWorkspace,
 } from './lib/session-history'
-import { SessionHistoryPanel } from './components/SessionHistoryPanel'
+import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
+import { listWorkspaces, saveWorkspaceToCloud } from './lib/projects'
 import { BuildProgressChat } from './components/BuildProgressChat'
 import {
   beginBuildProgress,
@@ -565,7 +567,8 @@ export default function App() {
   const [showVision, setShowVision] = useState(false)
   const [showCouncil, setShowCouncil] = useState(false)
   const [showAutopilot, setShowAutopilot] = useState(false)
-  const [showHistory, setShowHistory] = useState(false)
+  const [showProjects, setShowProjects] = useState(false)
+  const [projectsRevision, setProjectsRevision] = useState(0)
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() =>
     getActiveWorkspaceId(),
   )
@@ -1036,6 +1039,8 @@ export default function App() {
       if (h.hasBuilt && Object.keys(h.generatedFiles).length > 0) {
         setGeneratedFiles(mergeProjectFiles(h.generatedFiles))
         setPreviewRevision((n) => n + 1)
+        setWorkspaceTab('preview')
+        setMobilePanel('app')
       } else {
         setGeneratedFiles(STARTER_FILES)
       }
@@ -1045,6 +1050,7 @@ export default function App() {
       setActiveWorkspaceIdState(ws.id)
       setActiveWorkspaceId(ws.id)
       setShowWorkspace(true)
+      setProjectsRevision((n) => n + 1)
       if (!opts?.quiet) {
         toast.success(`Loaded “${ws.name}”`, {
           description:
@@ -1082,8 +1088,8 @@ export default function App() {
     const last = getLastSession()
     if (last && shouldRestoreWorkspace(last)) {
       loadWorkspaceIntoApp(last, { quiet: true })
-      toast.message('Resumed your last session', {
-        description: `${last.name} · open History to switch`,
+      toast.message('Resumed your last project', {
+        description: `${last.name} · open Projects to switch`,
         duration: 5000,
       })
     } else if (last?.id) {
@@ -1101,7 +1107,7 @@ export default function App() {
     const timer = window.setTimeout(() => {
       const msgs = messagesRef.current
       if (!isSubstantiveSession(msgs)) return
-      const saved = persistSessionSnapshot({
+      void persistAndSyncSnapshot({
         workspaceId: activeWorkspaceId,
         messages: msgs,
         mode,
@@ -1111,10 +1117,12 @@ export default function App() {
         lastBuiltName,
         lastBuildPlan,
         personality,
+      }).then((saved) => {
+        if (saved?.id && saved.id !== activeWorkspaceId) {
+          setActiveWorkspaceIdState(saved.id)
+        }
+        if (saved) setProjectsRevision((n) => n + 1)
       })
-      if (saved?.id && saved.id !== activeWorkspaceId) {
-        setActiveWorkspaceIdState(saved.id)
-      }
     }, 900)
     return () => window.clearTimeout(timer)
   }, [
@@ -1221,7 +1229,7 @@ export default function App() {
             : 'Sandpack preview mounted — check the right panel',
           'Engineer',
         )
-        persistSessionSnapshot({
+        void persistAndSyncSnapshot({
           workspaceId: activeWorkspaceId,
           messages: history,
           mode: 'build',
@@ -1231,6 +1239,8 @@ export default function App() {
           lastBuiltName: name,
           lastBuildPlan: plan,
           personality,
+        }).then((saved) => {
+          if (saved) setProjectsRevision((n) => n + 1)
         })
         await progress.complete(name, false)
         toast.success('Live preview ready', {
@@ -1269,7 +1279,7 @@ export default function App() {
                   source = 'grok'
                   setPreviewRevision((n) => n + 1)
                   progress.note('Grok upgrade applied to preview', 'Builder')
-                  persistSessionSnapshot({
+                  void persistAndSyncSnapshot({
                     workspaceId: activeWorkspaceId,
                     messages: history,
                     mode: 'build',
@@ -1279,6 +1289,8 @@ export default function App() {
                     lastBuiltName: name,
                     lastBuildPlan: plan,
                     personality,
+                  }).then((saved) => {
+                    if (saved) setProjectsRevision((n) => n + 1)
                   })
                   toast.success('Preview upgraded', { description: `${name} · Grok build` })
                 } else {
@@ -1824,6 +1836,38 @@ export default function App() {
     (f) => f.endsWith('.tsx') || f.endsWith('.css') || f.endsWith('.ts') || f === 'package.json',
   )
 
+  const projectCount = listWorkspaces().length
+
+  const saveCurrentProject = useCallback(() => {
+    const msgs = messagesRef.current
+    if (!isSubstantiveSession(msgs)) return null
+    const saved = persistSessionSnapshot({
+      workspaceId: activeWorkspaceId,
+      messages: msgs,
+      mode,
+      planReady,
+      hasBuilt,
+      generatedFiles,
+      lastBuiltName,
+      lastBuildPlan,
+      personality,
+    })
+    if (saved) {
+      void saveWorkspaceToCloud(saved).catch(() => {})
+      setProjectsRevision((n) => n + 1)
+    }
+    return saved
+  }, [
+    activeWorkspaceId,
+    mode,
+    planReady,
+    hasBuilt,
+    generatedFiles,
+    lastBuiltName,
+    lastBuildPlan,
+    personality,
+  ])
+
   return (
     <div className="h-dvh flex flex-col bg-[#0a0a0f] text-[#e8e8f0] overflow-hidden font-sans antialiased">
       <Toaster theme="dark" position="top-center" richColors closeButton />
@@ -1927,12 +1971,17 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setShowHistory(true)}
+            onClick={() => setShowProjects(true)}
             className="inline-flex items-center gap-1.5 h-9 px-2 sm:px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#7dd3fc] hover:border-[#7dd3fc]/35 transition-colors"
-            title="Session history"
+            title="Projects library"
           >
-            <History size={14} />
-            <span className="hidden sm:inline">History</span>
+            <FolderOpen size={14} />
+            <span className="hidden sm:inline">Projects</span>
+            {projectCount > 0 && (
+              <span className="text-[10px] font-bold tabular-nums text-[#7dd3fc]/80">
+                {projectCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -2803,12 +2852,16 @@ export default function App() {
         }}
       />
 
-      <SessionHistoryPanel
-        open={showHistory}
-        onClose={() => setShowHistory(false)}
+      <ProjectsLibraryPanel
+        open={showProjects}
+        onClose={() => setShowProjects(false)}
         activeId={activeWorkspaceId}
+        revision={projectsRevision}
+        currentName={lastBuiltName}
         onSelect={loadWorkspaceIntoApp}
-        onNewSession={startNewSession}
+        onNewProject={startNewSession}
+        onSaveCurrent={saveCurrentProject}
+        onLibraryChange={() => setProjectsRevision((n) => n + 1)}
       />
 
       <GalleryPanel

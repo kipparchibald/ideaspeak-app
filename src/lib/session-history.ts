@@ -6,6 +6,7 @@ import type { ProjectFile } from './projects'
 import {
   captureWorkspace,
   getWorkspace,
+  saveWorkspaceToCloud,
   upsertWorkspace,
   type ConversationMessage,
   type SavedWorkspace,
@@ -87,6 +88,17 @@ export function persistSessionSnapshot(input: SessionSnapshotInput): SavedWorksp
   if (!isSubstantiveSession(input.messages)) return null
   const workspace = snapshotToWorkspace(input)
   return upsertWorkspace(workspace)
+}
+
+/** Persist locally and best-effort push to cloud when signed in. */
+export async function persistAndSyncSnapshot(
+  input: SessionSnapshotInput,
+): Promise<SavedWorkspace | null> {
+  const workspace = persistSessionSnapshot(input)
+  if (workspace) {
+    void saveWorkspaceToCloud(workspace).catch(() => {})
+  }
+  return workspace
 }
 
 export function loadWorkspaceById(id: string): SavedWorkspace | null {
