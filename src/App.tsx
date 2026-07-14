@@ -35,6 +35,7 @@ import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { ModeBadge, type GrokMode } from './components/ModeBadge'
 import { ApiSetupPanel } from './components/ApiSetupPanel'
+import { FinishSetupPanel } from './components/FinishSetupPanel'
 import { AccountPanel } from './components/AccountPanel'
 import { ShipPanel } from './components/ShipPanel'
 import { PricingPanel } from './components/PricingPanel'
@@ -354,6 +355,7 @@ function SettingsModal({
   ttsEnabled,
   setTtsEnabled,
   onKeySaved,
+  onOpenGithubImport,
 }: {
   open: boolean
   onClose: () => void
@@ -362,6 +364,7 @@ function SettingsModal({
   ttsEnabled: boolean
   setTtsEnabled: (v: boolean) => void
   onKeySaved: (hasKey: boolean) => void
+  onOpenGithubImport?: () => void
 }) {
   return (
     <AnimatePresence>
@@ -377,7 +380,7 @@ function SettingsModal({
             initial={{ scale: 0.96, opacity: 0, y: 8 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.98, opacity: 0 }}
-            className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1f1f27] bg-[#111116] p-6 shadow-2xl"
+            className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1f1f27] bg-[#111116] p-6 shadow-2xl"
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">Settings</h2>
@@ -391,6 +394,10 @@ function SettingsModal({
             </div>
 
             <ApiSetupPanel onKeySaved={onKeySaved} />
+
+            <div className="h-px bg-[#1f1f27] my-6" />
+
+            <FinishSetupPanel onOpenGithubImport={onOpenGithubImport} />
 
             <div className="h-px bg-[#1f1f27] my-6" />
 
@@ -2853,6 +2860,11 @@ export default function App() {
               })
             }
           })
+        }}
+        onOpenGithubImport={() => {
+          setShowSettings(false)
+          setShowProjects(true)
+          setShowGithubImport(true)
         }}
       />
 

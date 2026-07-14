@@ -19,6 +19,7 @@
     "e2e:voice-preview": "BASE_URL=http://localhost:5173 bun scripts/e2e-voice-preview.mjs",
     "deploy": "bash scripts/deploy.sh",
     "setup:grok": "bash scripts/setup-local-grok.sh",
+    "setup:check": "bun scripts/setup-check.mjs",
     "verify:grok": "bun scripts/verify-grok.mjs",
     "setup:in-house": "bun scripts/setup-in-house.mjs",
     "verify:in-house": "bun scripts/verify-in-house.mjs",

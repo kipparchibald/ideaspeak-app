@@ -164,6 +164,34 @@ const server = serve({
       )
     }
 
+    if (url.pathname === '/api/capabilities' && req.method === 'GET') {
+      const features = getFeatureFlags()
+      return Response.json(
+        {
+          platform: 'bun',
+          capabilities: {
+            grok: features.xai,
+            voice: features.xai,
+            build: features.xai,
+            discuss: features.xai,
+            refine: features.xai,
+            tts: features.xai,
+            e2b: features.e2b,
+            supabaseServer: features.supabase,
+            shipWorker: !!(
+              process.env.SHIP_WORKER_URL?.trim() && process.env.SHIP_WORKER_SECRET?.trim()
+            ),
+            stripe: features.stripe,
+            githubServer: !!process.env.GITHUB_TOKEN?.trim(),
+            vercelDeploy: !!process.env.VERCEL_TOKEN?.trim(),
+          },
+          models: { chat: CHAT_MODEL, build: BUILD_MODEL },
+          features,
+        },
+        { headers },
+      )
+    }
+
     // ── Status / key verification (used by Settings + ModeBadge) ─────────────
     if (url.pathname === '/api/status' && (req.method === 'GET' || req.method === 'POST')) {
       const clientKey =
