@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api/voice/token", "destination": "/api/voice-token" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

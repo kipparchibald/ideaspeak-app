@@ -188,35 +188,44 @@ export class GrokVoiceAgent {
     this.onVisibilityBound = null
   }
 
+  private async fetchVoiceToken(path: string): Promise<string> {
+    const res = await fetch(path, {
+      method: 'POST',
+      signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+    })
+    const data = await res.json().catch(() => ({} as Record<string, unknown>))
+    if (!res.ok) {
+      throw new Error(
+        (typeof data.error === 'string' && data.error) ||
+          (typeof data.message === 'string' && data.message) ||
+          `Voice token failed (${res.status})`,
+      )
+    }
+    const raw =
+      (data.client_secret as { value?: string } | undefined)?.value ||
+      (typeof data.value === 'string' ? data.value : '') ||
+      (typeof data.token === 'string' ? data.token : '') ||
+      (typeof data.client_secret === 'string' ? data.client_secret : '')
+    if (!raw) throw new Error('Voice token response missing client_secret')
+    return raw.startsWith('xai-client-secret.')
+      ? raw.slice('xai-client-secret.'.length)
+      : raw
+  }
+
   private async getEphemeralToken(): Promise<string> {
+    const paths = ['/api/voice/token', '/api/voice-token']
     let lastErr = 'Voice token failed'
     for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
-      try {
-        const res = await fetch('/api/voice/token', {
-          method: 'POST',
-          signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
-        })
-        const data = await res.json().catch(() => ({} as Record<string, unknown>))
-        if (!res.ok) {
-          throw new Error(
-            (typeof data.error === 'string' && data.error) ||
-              (typeof data.message === 'string' && data.message) ||
-              `Voice token failed (${res.status})`,
-          )
+      for (const path of paths) {
+        try {
+          return await this.fetchVoiceToken(path)
+        } catch (e: unknown) {
+          lastErr = e instanceof Error ? e.message : String(e)
+          // Only try alternate path on 404; other errors are not path-specific
+          if (!lastErr.includes('(404)')) break
         }
-        const raw =
-          (data.client_secret as { value?: string } | undefined)?.value ||
-          (typeof data.value === 'string' ? data.value : '') ||
-          (typeof data.token === 'string' ? data.token : '') ||
-          (typeof data.client_secret === 'string' ? data.client_secret : '')
-        if (!raw) throw new Error('Voice token response missing client_secret')
-        return raw.startsWith('xai-client-secret.')
-          ? raw.slice('xai-client-secret.'.length)
-          : raw
-      } catch (e: unknown) {
-        lastErr = e instanceof Error ? e.message : String(e)
-        if (attempt < CONNECT_RETRIES - 1) await sleep(500 * (attempt + 1))
       }
+      if (attempt < CONNECT_RETRIES - 1) await sleep(500 * (attempt + 1))
     }
     throw new Error(lastErr)
   }

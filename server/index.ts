@@ -313,7 +313,10 @@ const server = serve({
     // ── Ephemeral token for Grok Voice Agent ─────────────────────────────────
     // Browser connects to wss://api.x.ai using this short-lived token
     // so XAI_API_KEY never touches client-side code
-    if (url.pathname === '/api/voice/token' && req.method === 'POST') {
+    if (
+      (url.pathname === '/api/voice/token' || url.pathname === '/api/voice-token') &&
+      req.method === 'POST'
+    ) {
       const apiKey = process.env.XAI_API_KEY
       if (!apiKey) {
         return Response.json(
