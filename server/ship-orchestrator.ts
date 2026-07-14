@@ -1,9 +1,18 @@
 /**
  * Ship orchestrator — server-side GitHub → Vercel → env → domain → live URL.
- * In-memory job store (skeleton); replace with Supabase when persistence ships.
+ * Hot in-memory cache + Supabase persistence via ship-job-store.
  *
  * Types mirror src/lib/ship-job-types.ts / autopilot LaunchTimelineEvent when merged.
  */
+
+import {
+  appendDeployJobEvent,
+  isShipStorePersistent,
+  loadDeployJob,
+  patchDeployJob,
+  saveDeployJob,
+  syncDeployJobRecord,
+} from './ship-job-store.js'
 
 // ── Types (compatible with ship-job-types.ts + autopilot) ───────────────────
 
@@ -72,8 +81,17 @@ const jobs = new Map<string, ShipJobRecord>()
 let eventCounter = 0
 let jobCounter = 0
 
-export function getShipJob(id: string): ShipJobRecord | undefined {
-  return jobs.get(id)
+export async function getShipJob(id: string): Promise<ShipJobRecord | undefined> {
+  const cached = jobs.get(id)
+  if (cached) return cached
+
+  const loaded = await loadDeployJob(id)
+  if (loaded) {
+    jobs.set(id, loaded)
+    return loaded
+  }
+
+  return undefined
 }
 
 export function listShipJobs(): ShipJobRecord[] {
@@ -100,9 +118,20 @@ export function serializeShipJob(job: ShipJobRecord) {
   }
 }
 
-export function createShipJob(opts: Omit<RunShipJobOpts, 'scaffoldFiles' | 'onProgress'>): string {
+export async function createShipJob(
+  opts: Omit<RunShipJobOpts, 'scaffoldFiles' | 'onProgress'> & { jobId?: string },
+): Promise<string> {
+  const providedId = opts.jobId?.trim()
+  if (providedId) {
+    const existing = await loadDeployJob(providedId)
+    if (existing) {
+      jobs.set(providedId, existing)
+      return providedId
+    }
+  }
+
   jobCounter += 1
-  const id = `ship-${Date.now()}-${jobCounter}`
+  const id = providedId || `ship-${Date.now()}-${jobCounter}`
   const now = Date.now()
   const record: ShipJobRecord = {
     id,
@@ -116,6 +145,7 @@ export function createShipJob(opts: Omit<RunShipJobOpts, 'scaffoldFiles' | 'onPr
     events: [],
   }
   jobs.set(id, record)
+  await saveDeployJob(record)
   return id
 }
 
@@ -251,14 +281,14 @@ async function pushScaffoldToGithub(
   owner: string,
   repo: string,
   files: Record<string, string>,
-  onFile?: (path: string, index: number, total: number) => void,
+  onFile?: (path: string, index: number, total: number) => void | Promise<void>,
 ): Promise<void> {
   const paths = Object.keys(files).filter((p) => files[p] != null)
   const treeItems: { path: string; mode: string; type: string; sha: string }[] = []
 
   for (let i = 0; i < paths.length; i++) {
     const path = paths[i]
-    onFile?.(path, i + 1, paths.length)
+    await onFile?.(path, i + 1, paths.length)
     const blob = await githubFetch<{ sha: string }>(token, `/repos/${owner}/${repo}/git/blobs`, {
       method: 'POST',
       body: JSON.stringify({ content: files[path], encoding: 'utf-8' }),
@@ -377,6 +407,9 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
 
   job.status = 'running'
   job.updatedAt = Date.now()
+  if (isShipStorePersistent()) {
+    await patchDeployJob(jobId, { status: 'running', updatedAt: job.updatedAt })
+  }
 
   const safeSlug = slugify(opts.appSlug || opts.appName)
   const githubToken = getGithubToken()
@@ -388,7 +421,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
   let vercelProjectId: string | undefined
   let fatalError: string | undefined
 
-  const progress = (
+  const progress = async (
     partial: Omit<ShipJobEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number },
   ) => {
     const event: ShipJobEvent = {
@@ -405,11 +438,24 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
     job.events.push(event)
     job.updatedAt = Date.now()
     opts.onProgress?.(event)
+
+    if (isShipStorePersistent()) {
+      await appendDeployJobEvent(jobId, event)
+      await patchDeployJob(jobId, {
+        status: job.status,
+        repoUrl: job.repoUrl,
+        vercelProjectId: job.vercelProjectId,
+        liveUrl: job.liveUrl,
+        error: job.error,
+        updatedAt: job.updatedAt,
+      })
+    }
+
     return event
   }
 
   // ── GitHub ────────────────────────────────────────────────────────────────
-  progress({
+  await progress({
     step: ShipStep.github,
     status: 'running',
     title: 'GitHub',
@@ -433,7 +479,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
         const msg = err instanceof Error ? err.message : String(err)
         if (!/already exists/i.test(msg)) throw err
         repoUrl = `https://github.com/${user.login}/${safeSlug}`
-        progress({
+        await progress({
           step: ShipStep.github,
           status: 'running',
           title: 'GitHub',
@@ -445,8 +491,8 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
       const uploadable = filterScaffoldForGithub(opts.scaffoldFiles)
       const total = Object.keys(uploadable).length
 
-      await pushScaffoldToGithub(githubToken, user.login, safeSlug, uploadable, (path, index, t) => {
-        progress({
+      await pushScaffoldToGithub(githubToken, user.login, safeSlug, uploadable, async (path, index, t) => {
+        await progress({
           step: ShipStep.github,
           status: 'running',
           title: 'GitHub',
@@ -457,7 +503,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
 
       vercelDeployUrl = SHIP_LINKS.vercelDeployButton(repoUrl)
       job.repoUrl = repoUrl
-      progress({
+      await progress({
         step: ShipStep.github,
         status: 'success',
         title: 'GitHub',
@@ -467,7 +513,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
     } catch (err) {
       const message = err instanceof Error ? err.message : 'GitHub step failed'
       fatalError = message
-      progress({
+      await progress({
         step: ShipStep.github,
         status: 'error',
         title: 'GitHub',
@@ -476,7 +522,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
       })
     }
   } else {
-    progress({
+    await progress({
       step: ShipStep.github,
       status: 'manual',
       title: 'GitHub',
@@ -487,7 +533,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
   }
 
   // ── Vercel ────────────────────────────────────────────────────────────────
-  progress({
+  await progress({
     step: ShipStep.vercel,
     status: repoUrl && vercelToken ? 'running' : 'manual',
     title: 'Vercel',
@@ -508,7 +554,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
         job.vercelProjectId = project.id
         vercelDeployUrl = `https://vercel.com/${parsed.owner}/${project.name}`
         job.vercelDeployUrl = vercelDeployUrl
-        progress({
+        await progress({
           step: ShipStep.vercel,
           status: 'success',
           title: 'Vercel',
@@ -519,7 +565,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
         const message = err instanceof Error ? err.message : 'Vercel project creation failed'
         vercelDeployUrl = SHIP_LINKS.vercelDeployButton(repoUrl)
         job.vercelDeployUrl = vercelDeployUrl
-        progress({
+        await progress({
           step: ShipStep.vercel,
           status: 'manual',
           title: 'Vercel',
@@ -529,7 +575,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
       }
     } else {
       job.vercelDeployUrl = vercelDeployUrl
-      progress({
+      await progress({
         step: ShipStep.vercel,
         status: 'manual',
         title: 'Vercel',
@@ -539,7 +585,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
     }
   } else if (repoUrl) {
     job.vercelDeployUrl = vercelDeployUrl
-    progress({
+    await progress({
       step: ShipStep.vercel,
       status: 'manual',
       title: 'Vercel',
@@ -555,7 +601,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
     NEXT_PUBLIC_SUPABASE_ANON_KEY: supabase.anonKey || 'your-anon-key',
   }
 
-  progress({
+  await progress({
     step: ShipStep.env,
     status: hasEnv ? 'running' : 'waiting',
     title: 'Environment',
@@ -569,7 +615,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
     try {
       await setVercelEnvVar(vercelProjectId, 'NEXT_PUBLIC_SUPABASE_URL', supabase.url)
       await setVercelEnvVar(vercelProjectId, 'NEXT_PUBLIC_SUPABASE_ANON_KEY', supabase.anonKey)
-      progress({
+      await progress({
         step: ShipStep.env,
         status: 'success',
         title: 'Environment',
@@ -579,7 +625,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Env injection failed'
-      progress({
+      await progress({
         step: ShipStep.env,
         status: 'manual',
         title: 'Environment',
@@ -589,7 +635,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
       })
     }
   } else if (hasEnv) {
-    progress({
+    await progress({
       step: ShipStep.env,
       status: 'manual',
       title: 'Environment',
@@ -600,7 +646,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
   }
 
   // ── Domain ────────────────────────────────────────────────────────────────
-  progress({
+  await progress({
     step: ShipStep.domain,
     status: 'skipped',
     title: 'Domain',
@@ -613,7 +659,7 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
   const fallbackUrl = guessVercelUrl(safeSlug)
   job.liveUrl = liveUrl
 
-  progress({
+  await progress({
     step: ShipStep.done,
     status: fatalError ? 'error' : 'success',
     title: 'Live',
@@ -627,6 +673,10 @@ export async function runShipJob(jobId: string, opts: RunShipJobOpts): Promise<S
   job.status = fatalError ? 'error' : 'success'
   job.error = fatalError
   job.updatedAt = Date.now()
+
+  if (isShipStorePersistent()) {
+    await syncDeployJobRecord(job)
+  }
 
   return job
 }

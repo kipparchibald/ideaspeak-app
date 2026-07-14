@@ -43,8 +43,13 @@ import {
   startShipJob,
   pollShipJob,
   ShipJobApiError,
+  formatShipChangelog,
+  getLastDeployChange,
   type ShipJobEvent,
 } from '../lib/ship-jobs'
+import { speak } from '../lib/tts'
+import { IN_HOUSE_PLATFORM, PLATFORM_COPY } from '../lib/platform'
+import { fabricLiveUrl } from '../lib/fabric-tenant'
 
 const STEP_ICONS: Record<LaunchStep, typeof FolderGit2> = {
   [LaunchStep.github]: FolderGit2,
@@ -101,14 +106,11 @@ export function LaunchAutopilotPanel({
   const [githubToken, setGithubToken] = useState(() => loadGithubToken())
   const [showToken, setShowToken] = useState(false)
   const [launching, setLaunching] = useState(false)
-  const [useServerAutopilot, setUseServerAutopilot] = useState(() => !loadGithubToken().trim())
+  const [useServerAutopilot] = useState(() => IN_HOUSE_PLATFORM || !loadGithubToken().trim())
   const [events, setEvents] = useState<LaunchTimelineEvent[]>([])
+  const [deployChangelog, setDeployChangelog] = useState<string | null>(null)
   const [liveUrl, setLiveUrl] = useState(() => loadAutopilotState()?.liveUrl || '')
   const abortRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    if (!githubToken.trim()) setUseServerAutopilot(true)
-  }, [githubToken])
 
   useEffect(() => {
     if (!open) return
@@ -241,6 +243,7 @@ export function LaunchAutopilotPanel({
 
     setLaunching(true)
     setEvents([])
+    setDeployChangelog(null)
     setExpanded(LaunchStep.github)
 
     try {
@@ -275,15 +278,20 @@ export function LaunchAutopilotPanel({
 
           setExpanded(LaunchStep.done)
 
+          const changelog = formatShipChangelog(final.events)
+          setDeployChangelog(getLastDeployChange(final.events) || changelog)
+
           if (final.status === 'success') {
             toast.success('Server Autopilot finished', {
-              description: final.liveUrl || 'Your app is deploying on the server',
+              description: changelog || final.liveUrl || 'Your app is deploying on the server',
             })
+            void speak(changelog, { provider: 'auto' }).catch(() => null)
           } else if (final.error) {
             toast.error(final.error)
           }
           return
         } catch (serverErr) {
+          if (IN_HOUSE_PLATFORM) throw serverErr
           const unavailable =
             serverErr instanceof ShipJobApiError &&
             (serverErr.status === 404 || serverErr.status === 501 || serverErr.status === 503)
@@ -292,7 +300,9 @@ export function LaunchAutopilotPanel({
         }
       }
 
-      await runClientAutopilot(scaffold, ac.signal)
+      if (!IN_HOUSE_PLATFORM) {
+        await runClientAutopilot(scaffold, ac.signal)
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         toast.message('Launch cancelled')
@@ -347,10 +357,12 @@ export function LaunchAutopilotPanel({
                   </div>
                   <div>
                     <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">
-                      Launch Autopilot
+                      {IN_HOUSE_PLATFORM ? PLATFORM_COPY.shipHeadline : 'Launch Autopilot'}
                     </h2>
                     <p className="text-[12px] text-[#666]">
-                      GitHub → Vercel → env → domain → live URL
+                      {IN_HOUSE_PLATFORM
+                        ? PLATFORM_COPY.shipSub
+                        : 'GitHub → Vercel → env → domain → live URL'}
                     </p>
                   </div>
                 </div>
@@ -389,22 +401,26 @@ export function LaunchAutopilotPanel({
                 </label>
               </div>
 
-              <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={useServerAutopilot}
-                  onChange={(e) => setUseServerAutopilot(e.target.checked)}
-                  disabled={launching}
-                  className="rounded border-[#2a2a35] bg-[#111116] text-[#7dd3fc] focus:ring-[#7dd3fc]/30"
-                />
-                <span className="text-[11px] text-[#888]">
-                  <span className="font-semibold text-[#aaa]">Server Autopilot</span>
-                  {' — '}
-                  {!githubToken.trim()
-                    ? 'recommended (no GitHub token)'
-                    : 'run deploy on Railway server'}
-                </span>
-              </label>
+              {IN_HOUSE_PLATFORM ? (
+                <p className="mt-3 text-[11px] text-[#7dd3fc]/90">
+                  Target URL:{' '}
+                  <span className="font-mono text-[#aaa]">{fabricLiveUrl(prefs.appSlug)}</span>
+                </p>
+              ) : (
+                <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={useServerAutopilot}
+                    readOnly
+                    disabled
+                    className="rounded border-[#2a2a35] bg-[#111116] text-[#7dd3fc]"
+                  />
+                  <span className="text-[11px] text-[#888]">
+                    <span className="font-semibold text-[#aaa]">Server Autopilot</span>
+                    {' — run deploy on IdeaSpeak infrastructure'}
+                  </span>
+                </label>
+              )}
 
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[11px] mb-1.5">
@@ -517,7 +533,14 @@ export function LaunchAutopilotPanel({
                                   ))}
                                 </ul>
 
-                                {stepMeta.id === LaunchStep.github && (
+                                {stepMeta.id === LaunchStep.github && IN_HOUSE_PLATFORM && (
+                                  <p className="text-[11.5px] text-[#777] leading-relaxed">
+                                    IdeaSpeak creates a private repo under our GitHub org and pushes
+                                    your production scaffold — no token needed.
+                                  </p>
+                                )}
+
+                                {stepMeta.id === LaunchStep.github && !IN_HOUSE_PLATFORM && (
                                   <div className="space-y-2">
                                     <label className="block">
                                       <span className="text-[10px] font-semibold text-[#666] uppercase tracking-wider">
@@ -700,6 +723,15 @@ export function LaunchAutopilotPanel({
                   )
                 })}
               </div>
+
+              {deployChangelog && (
+                <p className="mt-4 px-1 text-[11px] text-[#666] leading-relaxed border-t border-[#1f1f27] pt-3">
+                  <span className="text-[#888] font-semibold uppercase tracking-wider text-[10px]">
+                    Deploy summary
+                  </span>
+                  <span className="block mt-1 text-[#777]">{deployChangelog}</span>
+                </p>
+              )}
             </div>
 
             {/* Footer */}

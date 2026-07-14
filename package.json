@@ -15,6 +15,7 @@
     "smoke:prod": "REQUIRE_LIVE=1 bun scripts/smoke-e2e.mjs",
     "smoke:local": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs --local",
     "smoke:local:live": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs --local --require-live",
+    "smoke:ship": "bun scripts/smoke-ship.mjs",
     "e2e:voice-preview": "BASE_URL=http://localhost:5173 bun scripts/e2e-voice-preview.mjs",
     "deploy": "bash scripts/deploy.sh",
     "setup:grok": "bash scripts/setup-local-grok.sh",

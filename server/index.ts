@@ -502,9 +502,21 @@ Rules:
     // ── Ship orchestrator (GitHub → Vercel → env → live) ───────────────────
     if (url.pathname === '/api/ship' && req.method === 'POST') {
       try {
+        const workerSecret = process.env.SHIP_WORKER_SECRET?.trim()
+        if (workerSecret) {
+          const provided =
+            req.headers.get('SHIP_WORKER_SECRET') ||
+            req.headers.get('x-ship-worker-secret') ||
+            ''
+          if (provided !== workerSecret) {
+            return Response.json({ error: 'Unauthorized' }, { status: 401, headers })
+          }
+        }
+
         const body = await req.json()
         const appName = typeof body.appName === 'string' ? body.appName.trim() : ''
         const appSlug = typeof body.appSlug === 'string' ? body.appSlug.trim() : ''
+        const jobIdFromBody = typeof body.jobId === 'string' ? body.jobId.trim() : undefined
         const scaffoldFiles =
           body.scaffoldFiles && typeof body.scaffoldFiles === 'object'
             ? (body.scaffoldFiles as Record<string, string>)
@@ -524,7 +536,8 @@ Rules:
           './ship-orchestrator.js'
         )
 
-        const jobId = createShipJob({
+        const jobId = await createShipJob({
+          jobId: jobIdFromBody,
           appName,
           appSlug,
           idea: typeof body.idea === 'string' ? body.idea : undefined,
@@ -541,7 +554,7 @@ Rules:
           console.error(`[ship] job ${jobId} failed:`, err)
         })
 
-        const job = getShipJob(jobId)
+        const job = await getShipJob(jobId)
         return Response.json(
           {
             jobId,
@@ -559,7 +572,7 @@ Rules:
     if (shipJobMatch && req.method === 'GET') {
       try {
         const { getShipJob, serializeShipJob } = await import('./ship-orchestrator.js')
-        const job = getShipJob(shipJobMatch[1])
+        const job = await getShipJob(shipJobMatch[1])
         if (!job) {
           return Response.json({ error: 'Job not found' }, { status: 404, headers })
         }

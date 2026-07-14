@@ -2,6 +2,7 @@
  * Ship orchestrator client — POST/GET /api/ship + polling.
  */
 
+import { LaunchStep } from './autopilot'
 import {
   TERMINAL_SHIP_JOB_STATUSES,
   type PollShipJobOpts,
@@ -10,6 +11,33 @@ import {
   type ShipJobStatus,
   type StartShipJobOpts,
 } from './ship-job-types'
+
+const STEP_VOICE_LABELS: Record<LaunchStep, string> = {
+  [LaunchStep.github]: 'GitHub',
+  [LaunchStep.vercel]: 'Vercel',
+  [LaunchStep.env]: 'environment variables',
+  [LaunchStep.domain]: 'custom domain',
+  [LaunchStep.done]: 'launch',
+}
+
+function eventVoiceLine(ev: ShipJobEvent): string | null {
+  const label = STEP_VOICE_LABELS[ev.step] || ev.title || ev.step
+  const detail = ev.message?.trim() || ev.title?.trim()
+  if (!detail) return null
+
+  if (ev.status === 'success') {
+    if (ev.url) return `${label}: ${detail}. Live at ${ev.url}`
+    return `${label}: ${detail}`
+  }
+  if (ev.status === 'error') {
+    return `${label} failed: ${ev.error?.trim() || detail}`
+  }
+  if (ev.status === 'running' || ev.status === 'manual' || ev.status === 'waiting') {
+    return `${label}: ${detail}`
+  }
+  if (ev.status === 'skipped') return null
+  return detail
+}
 
 export type {
   PollShipJobOpts,
@@ -256,6 +284,41 @@ export async function pollShipJob(
 
     await sleep(intervalMs, opts?.signal)
   }
+}
+
+/** Plain-language deploy summary for UI voice / TTS. */
+export function formatShipChangelog(events: ShipJobEvent[]): string {
+  if (!events.length) return 'Deploy queued. Waiting for the server to start.'
+
+  const lines = events
+    .map((ev) => eventVoiceLine(ev))
+    .filter((line): line is string => Boolean(line?.trim()))
+
+  if (!lines.length) {
+    const latest = events[events.length - 1]
+    return latest?.message?.trim() || latest?.title?.trim() || 'Deploy in progress.'
+  }
+
+  const terminal = events[events.length - 1]
+  if (terminal?.status === 'success' && terminal.step === LaunchStep.done) {
+    const live = terminal.url || terminal.meta?.liveUrl
+    if (live) lines.push(`Your app is live at ${live}`)
+  }
+
+  return lines.join('. ').replace(/\.\s*\./g, '.') + (lines.length ? '.' : '')
+}
+
+/** One-liner describing the most recent meaningful deploy step. */
+export function getLastDeployChange(events: ShipJobEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]
+    if (ev.status === 'pending' || ev.status === 'skipped') continue
+    const msg = ev.message?.trim()
+    if (msg) return msg
+    const title = ev.title?.trim()
+    if (title) return title
+  }
+  return null
 }
 
 /** True when /api/ship responds (any non-network failure still means route exists). */

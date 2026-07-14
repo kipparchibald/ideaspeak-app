@@ -4,6 +4,7 @@
  */
 
 import { councilExportFiles } from './council'
+import { generateTenantSlug } from './fabric-tenant'
 import { polishExportFiles } from './polish'
 
 export type ShipStepId =
@@ -182,17 +183,23 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabase.anonKey || 'your-anon-key'}
 `
 }
 
-export function envExampleContents(): string {
+export function envExampleContents(tenantId?: string): string {
+  const tenantLine = tenantId
+    ? `NEXT_PUBLIC_IDEASPEAK_TENANT_ID=${tenantId}`
+    : 'NEXT_PUBLIC_IDEASPEAK_TENANT_ID=your-tenant-id'
   return `# Copy to .env.local and fill in
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+${tenantLine}
 # SUPABASE_SERVICE_ROLE_KEY=
 # XAI_API_KEY=
 `
 }
 
 export function supabaseSchemaSql(appName: string): string {
-  return `-- IdeaSpeak starter schema for ${appName}
+  const tenantId = '{{TENANT_ID}}'
+  return `-- IdeaSpeak Fabric Lite schema for ${appName}
+-- IdeaSpeak platform uses a shared Supabase project — tenant_id isolates each app.
 -- Run in Supabase → SQL Editor → New query
 
 -- Profiles (extends auth.users)
@@ -214,28 +221,48 @@ create policy "Users can update own profile"
 create policy "Users can insert own profile"
   on public.profiles for insert with check (auth.uid() = id);
 
--- Example app data table
+-- Example app data table (tenant-scoped)
 create table if not exists public.items (
   id uuid primary key default gen_random_uuid(),
+  tenant_id text not null default '${tenantId}',
   user_id uuid references auth.users(id) on delete cascade not null,
   title text not null,
   body text,
   created_at timestamptz default now()
 );
 
+create index if not exists items_tenant_user_idx
+  on public.items (tenant_id, user_id);
+
 alter table public.items enable row level security;
 
-create policy "Users read own items"
-  on public.items for select using (auth.uid() = user_id);
+create policy "Tenant or user read items"
+  on public.items for select
+  using (
+    tenant_id = current_setting('app.tenant_id', true)
+    or (auth.uid() = user_id and tenant_id = '${tenantId}')
+  );
 
-create policy "Users insert own items"
-  on public.items for insert with check (auth.uid() = user_id);
+create policy "Tenant or user insert items"
+  on public.items for insert
+  with check (
+    tenant_id = current_setting('app.tenant_id', true)
+    or (auth.uid() = user_id and tenant_id = '${tenantId}')
+  );
 
-create policy "Users update own items"
-  on public.items for update using (auth.uid() = user_id);
+create policy "Tenant or user update items"
+  on public.items for update
+  using (
+    tenant_id = current_setting('app.tenant_id', true)
+    or (auth.uid() = user_id and tenant_id = '${tenantId}')
+  );
 
-create policy "Users delete own items"
-  on public.items for delete using (auth.uid() = user_id);
+create policy "Tenant or user delete items"
+  on public.items for delete
+  using (
+    tenant_id = current_setting('app.tenant_id', true)
+    or (auth.uid() = user_id and tenant_id = '${tenantId}')
+  );
 
 -- Auto-create profile on signup
 create or replace function public.handle_new_user()
@@ -551,6 +578,7 @@ function ensureRequiredScaffold(
   appSlug: string,
   prefs: ShipPreferences,
   idea: string,
+  tenantId: string,
 ): void {
   const fallbacks: Record<string, () => string> = {
     'package.json': () =>
@@ -601,7 +629,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   )
 }
 `,
-    '.env.example': () => envExampleContents(),
+    '.env.example': () => envExampleContents(tenantId),
     'README.md': () => buildReadme(appName, appSlug, prefs),
     'AGENTS.md': () => agentsMd(appName),
     'IDEA-SPEAK-CONTEXT.md': () => ideaSpeakContext(appName, idea),
@@ -626,6 +654,7 @@ export function buildProductionScaffold(opts: {
   prefs: ShipPreferences
 }): Record<string, string> {
   const { appName, appSlug, idea = '', previewFiles, prefs } = opts
+  const tenantId = generateTenantSlug(appSlug)
   const preview = flattenPreviewInput(previewFiles)
   const pageSource = buildPageSource(appName, preview)
   const previewCss = extractPreviewCss(preview)
@@ -731,12 +760,12 @@ export default config
 `,
     'vercel.json': vercelJson(),
     '.gitignore': gitignore(),
-    '.env.example': envExampleContents(),
+    '.env.example': envExampleContents(tenantId),
     '.env.local': envLocalContents(prefs),
     'AGENTS.md': agentsMd(appName),
     '.cursorrules': cursorrules(appName),
     'IDEA-SPEAK-CONTEXT.md': ideaSpeakContext(appName, idea),
-    'supabase/schema.sql': supabaseSchemaSql(appName),
+    'supabase/schema.sql': supabaseSchemaSql(appName).replace(/\{\{TENANT_ID\}\}/g, tenantId),
     'lib/supabase/client.ts': supabaseClientTs(),
     'lib/supabase/server.ts': supabaseServerTs(),
     'app/globals.css': mergeGlobalsCss(
@@ -804,7 +833,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   })
   Object.assign(files, councilFiles)
 
-  ensureRequiredScaffold(files, appName, appSlug, prefs, idea)
+  ensureRequiredScaffold(files, appName, appSlug, prefs, idea, tenantId)
 
   // Preserve original preview sources for reference
   for (const [path, content] of Object.entries(preview)) {

@@ -18,8 +18,13 @@
 | `E2B_API_KEY` | `.env.local` | — | ✅ | No | Real sandbox (Sprint 3); stub today |
 | `STRIPE_SECRET_KEY` | `.env.local` | — | ✅ | No | Payments (Sprint 5) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe CLI | — | ✅ | No | Webhook signature verification |
-| `SUPABASE_URL` | `.env.local` | — | ✅ | No | Auth + persistence (Sprint 4) |
-| `SUPABASE_SERVICE_KEY` | `.env.local` | — | ✅ | No | Server-side Supabase admin |
+| `SUPABASE_URL` | `.env.local` | ✅ | ✅ | No | Auth + persistence (Sprint 4); edge `/api/ship` queues `deploy_jobs` |
+| `SUPABASE_SERVICE_KEY` | `.env.local` | ✅ | ✅ | No | Server-side Supabase admin |
+| `SHIP_WORKER_URL` | — | ✅ | — | No | Railway worker base URL; Vercel edge forwards POST `/api/ship` |
+| `SHIP_WORKER_SECRET` | — | ✅ | ✅ | No | Shared secret (`x-ship-worker-secret`) between Vercel edge and Railway worker |
+| `GITHUB_TOKEN` | — | — | ✅ | No | Railway worker — create/push deploy repos |
+| `VERCEL_TOKEN` | — | — | ✅ | No | Railway worker — Vercel project + deploy API |
+| `VERCEL_TEAM_ID` | — | — | ✅ | No | Railway worker — Vercel team scope (optional if personal account) |
 | `VERCEL_ENV` | — | auto | — | — | Set by Vercel (`production`, `preview`, `development`) |
 
 ---
@@ -56,9 +61,13 @@ bun run dev:full   # Vite :5173 proxies /api → Bun :3001
 | `XAI_CHAT_MODEL` | Production / Preview | No | Chat completions model |
 | `XAI_BUILD_MODEL` | Production / Preview | No | Build agent model |
 | `VITE_API_BASE` | Production | No | Leave **empty** — same-origin edge API |
+| `SUPABASE_URL` | Production | No | Required for real ship job persistence (`deploy_jobs`) |
+| `SUPABASE_SERVICE_KEY` | Production | No | Edge `/api/ship` writes + polls job rows |
+| `SHIP_WORKER_URL` | Production | No | Public Railway URL; edge queues job then forwards payload |
+| `SHIP_WORKER_SECRET` | Production | No | Must match Railway worker; sent as `x-ship-worker-secret` |
 | `VERCEL_ENV` | auto | — | `api/xai.js` restricts client keys in production |
 
-**Not on Vercel (by design):** `E2B_API_KEY`, `STRIPE_*`, `SUPABASE_*` — these belong on Railway when those sprints ship.
+**Not on Vercel (by design):** `E2B_API_KEY`, `STRIPE_*`, `GITHUB_TOKEN`, `VERCEL_TOKEN` — long-lived deploy secrets stay on Railway.
 
 **Deploy:** `bun run deploy` or Vercel Git integration.
 
@@ -85,6 +94,12 @@ Use Railway when Vercel edge limits apply:
 | `STRIPE_WEBHOOK_SECRET` | Sprint 5+ | `POST /api/stripe/webhook` |
 | `SUPABASE_URL` | Sprint 4+ | Project URL |
 | `SUPABASE_SERVICE_KEY` | Sprint 4+ | Server writes (projects, usage, entitlements) |
+| `SHIP_WORKER_SECRET` | Ship worker | Must match Vercel; validates `x-ship-worker-secret` on `POST /api/ship` |
+| `GITHUB_TOKEN` | Ship worker | `repo` scope — push scaffold to GitHub |
+| `VERCEL_TOKEN` | Ship worker | Vercel REST API for project + deployment |
+| `VERCEL_TEAM_ID` | Ship worker | Optional team slug/id when not deploying to personal account |
+
+**Ship worker:** Railway service that receives forwarded jobs from Vercel edge (`SHIP_WORKER_URL`). Vercel sets `SHIP_WORKER_URL` + `SHIP_WORKER_SECRET`; Railway holds deploy tokens.
 
 **Frontend wiring:** set `VITE_API_BASE` to the Railway public URL at **build time** when a route must hit Railway instead of Vercel edge (voice tokens, sandbox). Production today uses Vercel edge for most `/api/*` calls.
 
@@ -97,6 +112,7 @@ Use Railway when Vercel edge limits apply:
 | `BASE_URL` | `scripts/smoke-e2e.mjs`, `verify-grok.mjs` | Target URL (default production) |
 | `REQUIRE_LIVE` | smoke script | Fail CI if Grok not live (`--require-live`) |
 | `IDEASPEAK_API` | `src/lib/xai.ts` (tests) | Override API base in unit-style smoke |
+| `BASE_URL` | `scripts/smoke-ship.mjs` | Target for `/api/ship` stub + poll (default production) |
 
 **CI workflow (`.github/workflows/ci.yml`):** no secrets required — runs `bun run build` then `bun run smoke:local` against preview `:5173` + Bun `:3001` (simulator mode).
 

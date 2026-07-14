@@ -111,18 +111,30 @@ function parseJobTimestamp(jobId) {
   return Number.isFinite(ts) ? ts : null
 }
 
-function rowToStatus(row) {
+function normalizeEvents(raw) {
+  if (Array.isArray(raw)) return raw
+  return []
+}
+
+/** Map Supabase deploy_jobs row → client job envelope (camelCase). */
+function rowToJob(row) {
   return {
-    jobId: row.id,
+    id: row.id,
+    userId: row.user_id ?? null,
+    appName: row.app_name || '',
+    appSlug: row.app_slug || '',
     status: row.status || 'queued',
     liveUrl: row.live_url ?? null,
     repoUrl: row.repo_url ?? null,
-    events: Array.isArray(row.events_json)
-      ? row.events_json
-      : Array.isArray(row.events)
-        ? row.events
-        : [],
+    events: normalizeEvents(row.events_json ?? row.events),
+    error: row.error ?? null,
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
   }
+}
+
+function jobEnvelope(job) {
+  return { job }
 }
 
 async function insertDeployJob(row) {
@@ -162,11 +174,15 @@ function stubJobProgress(jobId) {
   const ts = parseJobTimestamp(jobId)
   if (!ts) {
     return {
-      jobId,
+      id: jobId,
+      appName: '',
+      appSlug: '',
       status: 'error',
       liveUrl: null,
       repoUrl: null,
       events: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       stub: true,
       message: 'Invalid jobId — expected format job-<timestamp>',
     }
@@ -210,11 +226,15 @@ function stubJobProgress(jobId) {
   if (elapsed >= 2000) status = 'running'
 
   return {
-    jobId,
+    id: jobId,
+    appName: '',
+    appSlug: '',
     status,
     liveUrl: null,
     repoUrl: null,
     events,
+    createdAt: new Date(ts).toISOString(),
+    updatedAt: new Date().toISOString(),
     stub: true,
     message: 'Stub orchestrator — job is not deploying until worker is configured.',
   }
@@ -224,9 +244,13 @@ function forwardToWorker(payload) {
   const workerUrl = process.env.SHIP_WORKER_URL?.trim()
   if (!workerUrl) return
 
+  const headers = { 'Content-Type': 'application/json' }
+  const secret = process.env.SHIP_WORKER_SECRET?.trim()
+  if (secret) headers['x-ship-worker-secret'] = secret
+
   fetch(`${workerUrl.replace(/\/$/, '')}/api/ship`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   }).catch(() => null)
 }
@@ -249,10 +273,10 @@ export default async function handler(req) {
 
     const row = await fetchDeployJob(jobId)
     if (row) {
-      return jsonResponse(req, rowToStatus(row))
+      return jsonResponse(req, jobEnvelope(rowToJob(row)))
     }
 
-    return jsonResponse(req, stubJobProgress(jobId))
+    return jsonResponse(req, jobEnvelope(stubJobProgress(jobId)))
   }
 
   if (req.method === 'POST') {
@@ -327,12 +351,24 @@ export default async function handler(req) {
 
       return jsonResponse(
         req,
-        {
-          jobId,
-          status: 'queued',
-          liveUrl: null,
-          events: [],
-        },
+        jobEnvelope(
+          rowToJob(
+            inserted?.id
+              ? inserted
+              : {
+                  id: jobId,
+                  user_id: userId || null,
+                  app_name: appName,
+                  app_slug: appSlug,
+                  status: 'queued',
+                  live_url: null,
+                  repo_url: null,
+                  events_json: [],
+                  created_at: now,
+                  updated_at: now,
+                },
+          ),
+        ),
         200,
         rateHeaders,
       )
@@ -351,12 +387,18 @@ export default async function handler(req) {
 
     return jsonResponse(
       req,
-      {
-        jobId,
+      jobEnvelope({
+        id: jobId,
+        userId: userId ?? null,
+        appName,
+        appSlug,
         status: 'queued',
         liveUrl: null,
+        repoUrl: null,
         events: [],
-      },
+        createdAt: now,
+        updatedAt: now,
+      }),
       200,
       rateHeaders,
     )

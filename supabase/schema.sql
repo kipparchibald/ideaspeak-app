@@ -154,9 +154,14 @@ create table if not exists public.deploy_jobs (
   repo_url text,
   events_json jsonb not null default '[]'::jsonb,
   error text,
+  tenant_slug text,
+  vercel_project_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.deploy_jobs add column if not exists tenant_slug text;
+alter table public.deploy_jobs add column if not exists vercel_project_id text;
 
 create index if not exists deploy_jobs_user_created_idx
   on public.deploy_jobs (user_id, created_at desc);
@@ -173,3 +178,29 @@ drop trigger if exists deploy_jobs_set_updated_at on public.deploy_jobs;
 create trigger deploy_jobs_set_updated_at
   before update on public.deploy_jobs
   for each row execute function public.set_updated_at();
+
+-- ── App tenants (Fabric Lite — shared Supabase project) ─────────────────────
+create table if not exists public.app_tenants (
+  id text primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  app_slug text not null unique,
+  app_name text not null,
+  status text not null default 'active',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists app_tenants_user_created_idx
+  on public.app_tenants (user_id, created_at desc);
+
+alter table public.app_tenants enable row level security;
+
+create policy "Users read own app tenants"
+  on public.app_tenants for select
+  using (auth.uid() = user_id);
+
+-- Inserts/updates for app_tenants should go through service role (Railway server).
+
+-- ── Deploy jobs — Fabric Lite columns ────────────────────────────────────────
+alter table public.deploy_jobs add column if not exists tenant_slug text;
+alter table public.deploy_jobs add column if not exists vercel_project_id text;
+alter table public.deploy_jobs add column if not exists changelog_json jsonb not null default '[]'::jsonb;
