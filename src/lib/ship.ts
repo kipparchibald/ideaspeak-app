@@ -3,6 +3,7 @@
  * Production ZIP, Supabase wiring, Vercel host, domains, publish checklist.
  */
 
+import { councilExportFiles } from './council'
 import { polishExportFiles } from './polish'
 
 export type ShipStepId =
@@ -787,13 +788,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     }
   }
 
-  // Multi-model polish handoff (Cursor / Grok / Claude / GPT)
+  // Multi-model polish + Council launch review handoff
   const polishFiles = polishExportFiles({
     appName,
     idea,
     fileList: Object.keys(files),
   })
   Object.assign(files, polishFiles)
+
+  const councilFiles = councilExportFiles({
+    appName,
+    files,
+    transcript: idea,
+    shipPrefs: prefs,
+  })
+  Object.assign(files, councilFiles)
 
   ensureRequiredScaffold(files, appName, appSlug, prefs, idea)
 

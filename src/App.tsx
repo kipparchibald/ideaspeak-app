@@ -20,6 +20,9 @@ import {
   Crown,
   Maximize2,
   Minimize2,
+  LayoutGrid,
+  ScanEye,
+  Users,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
@@ -34,12 +37,30 @@ import { AccountPanel } from './components/AccountPanel'
 import { ShipPanel } from './components/ShipPanel'
 import { PricingPanel } from './components/PricingPanel'
 import { PolishPanel } from './components/PolishPanel'
+import VoicePairPanel from './components/VoicePairPanel'
+import { VisionRefinePanel, VISION_REFINE_CHIP } from './components/VisionRefinePanel'
+import { GalleryPanel } from './components/GalleryPanel'
+import { CouncilPanel } from './components/CouncilPanel'
+import { LaunchAutopilotPanel } from './components/LaunchAutopilotPanel'
 
 import {
   buildProductionScaffold,
+  loadShipPrefs,
   supabaseSchemaSql,
   type ShipPreferences,
 } from './lib/ship'
+import {
+  createVoicePairController,
+  type VoicePairController,
+  type VoicePairFilePatch,
+  type VoicePairStatus,
+} from './lib/voice-pair'
+import {
+  refineFromScreenshot,
+  applySuggestedFileEdits,
+} from './lib/vision-refine'
+import { remixWorkspace, type GalleryEntry } from './lib/gallery'
+import type { SavedWorkspace } from './lib/projects'
 import {
   canUse,
   recordUsage,
@@ -160,6 +181,38 @@ function toSandpackFiles(
     else if (val && typeof val === 'object' && 'code' in val) out[path] = val.code
   }
   return out
+}
+
+function workspaceFilesToGenerated(
+  files: SavedWorkspace['currentProject'] extends infer P
+    ? P extends { files: infer F }
+      ? F
+      : never
+    : never,
+): GeneratedFiles {
+  const out: GeneratedFiles = {}
+  if (!files) return out
+  for (const [path, val] of Object.entries(files as Record<string, { code: string }>)) {
+    out[path] = val.code
+  }
+  return out
+}
+
+function hydrateFromWorkspace(ws: SavedWorkspace) {
+  return {
+    messages: ws.conversation.map((m, i) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      timestamp: Date.now() - (ws.conversation.length - i) * 1000,
+    })),
+    mode: ws.mode,
+    planReady: !!ws.buildPlan || ws.status !== 'discussing',
+    hasBuilt: ws.status === 'built',
+    generatedFiles: workspaceFilesToGenerated(ws.currentProject?.files ?? {}),
+    lastBuiltName: ws.currentProject?.name ?? ws.name,
+    lastBuildPlan: ws.buildPlan?.oneLiner ?? ws.summary,
+    personality: (ws.selectedPersonality as Personality) || 'grok',
+  }
 }
 
 function mergeProjectFiles(generated: GeneratedFiles): GeneratedFiles {
@@ -443,6 +496,10 @@ export default function App() {
   const [showShip, setShowShip] = useState(false)
   const [showPricing, setShowPricing] = useState(false)
   const [showPolish, setShowPolish] = useState(false)
+  const [showGallery, setShowGallery] = useState(false)
+  const [showVision, setShowVision] = useState(false)
+  const [showCouncil, setShowCouncil] = useState(false)
+  const [showAutopilot, setShowAutopilot] = useState(false)
   const [planId, setPlanIdState] = useState<PlanId>(() => getPlanId())
   const [lastBuiltName, setLastBuiltName] = useState('My IdeaSpeak App')
   const [lastBuildPlan, setLastBuildPlan] = useState('')
@@ -571,6 +628,13 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
   const grokAgentRef = useRef<GrokVoiceAgent | null>(null)
+  const voicePairRef = useRef<VoicePairController | null>(null)
+  const [voicePairOpen, setVoicePairOpen] = useState(false)
+  const [voicePairStatus, setVoicePairStatus] = useState<VoicePairStatus>('idle')
+  const [voicePairNarration, setVoicePairNarration] = useState('')
+  const [voicePairPatches, setVoicePairPatches] = useState<VoicePairFilePatch[]>([])
+  const [voicePairAgentPaused, setVoicePairAgentPaused] = useState(false)
+  const prevGeneratedKeysRef = useRef<string[]>([])
   /** True while user wants the mic on — survives stale event closures */
   const voiceActiveRef = useRef(false)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -755,19 +819,100 @@ export default function App() {
     }
   }, [])
 
+  const stopVoicePair = useCallback(() => {
+    voicePairRef.current?.dispose()
+    voicePairRef.current = null
+    setVoicePairOpen(false)
+    setVoicePairStatus('idle')
+    setVoicePairNarration('')
+    setVoicePairAgentPaused(false)
+  }, [])
+
+  const startVoicePair = useCallback(async () => {
+    stopVoice()
+    voicePairRef.current?.dispose()
+    const ctrl = createVoicePairController({
+      onStatusChange: setVoicePairStatus,
+      onAgentNarration: (text, isFinal) =>
+        setVoicePairNarration(isFinal === false ? text : ''),
+      onFilePatch: (patch) =>
+        setVoicePairPatches((p) =>
+          [patch, ...p.filter((x) => x.path !== patch.path)].slice(0, 24),
+        ),
+      onTranscript: (text, isFinal) => {
+        if (isFinal) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', content: text.trim(), timestamp: Date.now() },
+          ])
+        }
+      },
+      onError: (err) => toast.error('Voice pair', { description: err }),
+    })
+    voicePairRef.current = ctrl
+    setVoicePairOpen(true)
+    setVoicePairPatches([])
+    setVoicePairNarration('')
+    try {
+      await ctrl.start()
+      setGrokLive(true)
+    } catch (e: unknown) {
+      stopVoicePair()
+      toast.error('Voice pair failed', {
+        description: e instanceof Error ? e.message : 'Could not connect',
+      })
+    }
+  }, [stopVoice, stopVoicePair])
+
+  useEffect(() => {
+    voicePairRef.current?.setAgentWorking(isBuilding)
+    if (!isBuilding) setVoicePairAgentPaused(false)
+  }, [isBuilding])
+
+  useEffect(() => {
+    const paths = Object.keys(generatedFiles)
+    const prev = new Set(prevGeneratedKeysRef.current)
+    for (const path of paths) {
+      if (!prev.has(path)) {
+        voicePairRef.current?.recordFilePatch({ path, summary: 'Added' })
+      }
+    }
+    prevGeneratedKeysRef.current = paths
+  }, [generatedFiles])
+
+  useEffect(() => () => voicePairRef.current?.dispose(), [])
+
   // Esc closes topmost modal / stops mic
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (showPricing) setShowPricing(false)
+      else if (showAutopilot) setShowAutopilot(false)
+      else if (showCouncil) setShowCouncil(false)
+      else if (showVision) setShowVision(false)
+      else if (showGallery) setShowGallery(false)
       else if (showPolish) setShowPolish(false)
       else if (showShip) setShowShip(false)
       else if (showSettings) setShowSettings(false)
+      else if (voicePairOpen) stopVoicePair()
       else if (voiceActiveRef.current || voiceStatus === 'prompting') stopVoice()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [showPricing, showPolish, showShip, showSettings, stopVoice, voiceStatus])
+  }, [
+    showPricing,
+    showAutopilot,
+    showCouncil,
+    showVision,
+    showGallery,
+    showPolish,
+    showShip,
+    showSettings,
+    voicePairOpen,
+    stopVoice,
+    stopVoicePair,
+    voiceStatus,
+  ])
 
   const revealLivePreview = useCallback(() => {
     setHasBuilt(true)
@@ -792,6 +937,7 @@ export default function App() {
       }
 
       setIsBuilding(true)
+      voicePairRef.current?.setNarration('Scaffolding your app…', { speak: true })
       const key = apiKey || loadKey() || undefined
 
       // Instant local scaffold so preview is never empty while APIs run
@@ -817,6 +963,10 @@ export default function App() {
         })
         name = themed.name || name
         setGeneratedFiles(mergeProjectFiles(themed.files))
+        voicePairRef.current?.setNarration(
+          `Wrote ${Object.keys(themed.files).length} preview files`,
+          { speak: true },
+        )
         setLastBuiltName(name)
         setLastBuildPlan(plan)
         revealLivePreview()
@@ -1249,6 +1399,105 @@ export default function App() {
 
   const lastUserIdea = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
 
+  const sessionTranscript = messages
+    .map((m) => `${m.role}: ${m.content}`)
+    .join('\n')
+    .slice(0, 4000)
+
+  const handleGalleryRemix = useCallback((entry: GalleryEntry) => {
+    const ws = remixWorkspace(entry)
+    if (!ws) {
+      toast.error('Could not remix', { description: 'Gallery entry not found' })
+      return
+    }
+    const h = hydrateFromWorkspace(ws)
+    setMessages(h.messages)
+    setMode(h.mode)
+    setPlanReady(h.planReady)
+    setHasBuilt(h.hasBuilt)
+    if (Object.keys(h.generatedFiles).length > 0) {
+      setGeneratedFiles(mergeProjectFiles(h.generatedFiles))
+      setPreviewRevision((n) => n + 1)
+    }
+    setLastBuiltName(h.lastBuiltName)
+    setLastBuildPlan(h.lastBuildPlan)
+    setPersonality(h.personality)
+    setShowWorkspace(true)
+    setWorkspaceTab('preview')
+    setMobilePanel('app')
+    toast.success(`Remixed “${entry.name}”`, {
+      description: 'Loaded into your workspace — refine by voice or ship',
+    })
+  }, [])
+
+  const handleVisionApply = useCallback(
+    async (refinementText: string, imageBase64: string | null) => {
+      setIsBuilding(true)
+      try {
+        const key = apiKey || loadKey() || undefined
+        const flat = { ...generatedFiles }
+
+        const vision = imageBase64
+          ? await refineFromScreenshot(
+              imageBase64,
+              {
+                appName: lastBuiltName,
+                idea: lastUserIdea,
+                fileList: Object.keys(generatedFiles),
+                appSourcePreview: flat['src/App.tsx'],
+                userNote: refinementText,
+              },
+              key,
+            )
+          : null
+
+        if (vision?.suggestedFileEdits?.length) {
+          const patched = applySuggestedFileEdits(flat, vision.suggestedFileEdits)
+          setGeneratedFiles(mergeProjectFiles(patched))
+          setPreviewRevision((n) => n + 1)
+          toast.success('Preview updated from screenshot')
+          return
+        }
+
+        const brief = {
+          vision: refinementText,
+          original: refinementText,
+          keyFeatures: ['Match screenshot'],
+        }
+        const llm = key ? await generateWithLLM(refinementText, brief, key, personality) : null
+        if (llm?.files) {
+          setGeneratedFiles(mergeProjectFiles(toSandpackFiles(llm.files as GeneratedFiles)))
+          setPreviewRevision((n) => n + 1)
+          toast.success('Live preview reskinned from screenshot')
+        } else {
+          toast.message('Refinement noted', { description: refinementText.slice(0, 120) })
+        }
+      } finally {
+        setIsBuilding(false)
+      }
+    },
+    [apiKey, generatedFiles, lastBuiltName, lastUserIdea, personality],
+  )
+
+  const getScaffoldFiles = async (prefs: ShipPreferences) => {
+    const appName = prefs.appName || lastBuiltName || 'IdeaSpeak App'
+    const appSlug = prefs.appSlug || 'ideaspeak-app'
+    const idea =
+      lastUserIdea ||
+      messages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.content)
+        .join(' · ')
+
+    return buildProductionScaffold({
+      appName,
+      appSlug,
+      idea,
+      previewFiles: generatedFiles,
+      prefs,
+    })
+  }
+
   const exportProductionZip = async (prefs?: ShipPreferences) => {
     const gate = canUse('ship')
     if (!gate.ok) {
@@ -1423,6 +1672,15 @@ export default function App() {
           >
             <Eye size={14} />
             {showWorkspace ? 'Focus chat' : 'Show app'}
+          </button>
+
+          <button
+            onClick={() => setShowGallery(true)}
+            className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 transition-colors"
+            title="Remix gallery"
+          >
+            <LayoutGrid size={14} />
+            Gallery
           </button>
 
           <button
@@ -1943,6 +2201,15 @@ export default function App() {
                     Live
                   </span>
                 )}
+                {hasBuilt && (
+                  <button
+                    type="button"
+                    onClick={() => setShowVision(true)}
+                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold border border-[#00ff88]/30 bg-[#00ff88]/08 text-[#00ff88] hover:bg-[#00ff88]/12 transition-colors"
+                  >
+                    {VISION_REFINE_CHIP}
+                  </button>
+                )}
                 {e2bAvailable && hasBuilt && (
                   <div className="hidden lg:flex items-center gap-1 p-0.5 rounded-lg bg-[#111116] border border-[#1f1f27]">
                     {(
@@ -1980,6 +2247,19 @@ export default function App() {
                           : `${Object.keys(generatedFiles).length} files · in-browser`
                         : 'Waiting for first build'}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => (voicePairOpen ? stopVoicePair() : void startVoicePair())}
+                  className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[12px] transition-colors ${
+                    voicePairOpen
+                      ? 'border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
+                      : 'border-[#1f1f27] text-[#777] hover:text-[#ccc] hover:border-[#333]'
+                  }`}
+                  title="Voice pair build — talk while agent codes"
+                >
+                  <Mic size={12} />
+                  <span className="hidden sm:inline">Pair</span>
+                </button>
                 <button
                   onClick={() => {
                     const main = generatedFiles['src/App.tsx'] || Object.values(generatedFiles)[0] || ''
@@ -2022,6 +2302,15 @@ export default function App() {
                   <span className="hidden sm:inline">{previewFullscreen ? 'Exit' : 'Test'}</span>
                 </button>
                 <button
+                  onClick={() => setShowVision(true)}
+                  disabled={!hasBuilt}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors"
+                  title="Upload a screenshot — Grok vision matches your live preview"
+                >
+                  <ScanEye size={13} />
+                  <span className="hidden sm:inline">Vision</span>
+                </button>
+                <button
                   onClick={() => setShowPolish(true)}
                   disabled={!hasBuilt}
                   className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors"
@@ -2029,6 +2318,24 @@ export default function App() {
                 >
                   <Wand2 size={13} />
                   <span className="hidden sm:inline">Polish</span>
+                </button>
+                <button
+                  onClick={() => setShowCouncil(true)}
+                  disabled={!hasBuilt}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#38bdf8] hover:border-[#38bdf8]/35 disabled:opacity-40 transition-colors"
+                  title="Council launch review — Grok, Claude, Cursor, GPT"
+                >
+                  <Users size={13} />
+                  <span className="hidden sm:inline">Council</span>
+                </button>
+                <button
+                  onClick={() => setShowAutopilot(true)}
+                  disabled={!hasBuilt}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-[#7dd3fc]/40 bg-[#7dd3fc]/15 text-[12px] font-bold text-[#7dd3fc] hover:opacity-90 disabled:opacity-40"
+                  title="Launch Autopilot — GitHub → Vercel → live URL"
+                >
+                  <Sparkles size={13} />
+                  Launch
                 </button>
                 <button
                   onClick={() => setShowShip(true)}
@@ -2042,6 +2349,30 @@ export default function App() {
             </div>
 
             <div className="flex-1 min-h-0 relative bg-[#06060a]">
+              {voicePairOpen && (
+                <div className="absolute bottom-3 left-3 right-3 z-30 sm:left-auto sm:right-3 sm:max-w-[340px] pointer-events-auto">
+                  <VoicePairPanel
+                    active={voicePairOpen}
+                    voiceStatus={voicePairStatus}
+                    narration={voicePairNarration}
+                    filePatches={voicePairPatches}
+                    agentPaused={voicePairAgentPaused}
+                    onBargeIn={() => {
+                      voicePairRef.current?.bargeIn()
+                      setVoicePairAgentPaused(true)
+                    }}
+                    onPauseAgent={() => {
+                      voicePairRef.current?.pauseAgent()
+                      setVoicePairAgentPaused(true)
+                    }}
+                    onResumeAgent={() => {
+                      voicePairRef.current?.resumeAgent()
+                      setVoicePairAgentPaused(false)
+                    }}
+                    onClose={stopVoicePair}
+                  />
+                </div>
+              )}
               {isBuilding && (
                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#08080c]/90 backdrop-blur-md">
                   <div className="w-10 h-10 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
@@ -2147,6 +2478,50 @@ export default function App() {
           setShowPolish(false)
           setShowPricing(true)
         }}
+      />
+
+      <GalleryPanel
+        open={showGallery}
+        onClose={() => setShowGallery(false)}
+        onRemix={handleGalleryRemix}
+      />
+
+      <VisionRefinePanel
+        open={showVision}
+        onClose={() => setShowVision(false)}
+        hasBuilt={hasBuilt}
+        appName={lastBuiltName}
+        idea={lastUserIdea}
+        fileList={Object.keys(generatedFiles)}
+        appSourcePreview={generatedFiles['src/App.tsx']}
+        apiKey={apiKey || loadKey() || undefined}
+        onApply={handleVisionApply}
+      />
+
+      <CouncilPanel
+        open={showCouncil}
+        onClose={() => setShowCouncil(false)}
+        context={{
+          appName: lastBuiltName,
+          files: generatedFiles,
+          transcript: sessionTranscript || lastUserIdea,
+          shipPrefs: loadShipPrefs(),
+        }}
+        onUpgrade={() => {
+          setShowCouncil(false)
+          setShowPricing(true)
+        }}
+        onApplyFix={(action) => {
+          void sendMessage(`Council fix: ${action}`, 'discuss')
+        }}
+      />
+
+      <LaunchAutopilotPanel
+        open={showAutopilot}
+        onClose={() => setShowAutopilot(false)}
+        hasBuilt={hasBuilt}
+        defaultAppName={lastBuiltName}
+        getScaffoldFiles={getScaffoldFiles}
       />
 
       <PricingPanel
