@@ -77,7 +77,8 @@ import {
   shouldRestoreWorkspace,
 } from './lib/session-history'
 import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
-import { listWorkspaces, saveWorkspaceToCloud } from './lib/projects'
+import { GithubImportPanel } from './components/GithubImportPanel'
+import { listWorkspaces, saveWorkspaceToCloud, upsertWorkspace } from './lib/projects'
 import { BuildProgressChat } from './components/BuildProgressChat'
 import {
   beginBuildProgress,
@@ -482,6 +483,7 @@ export default function App() {
   const [showCouncil, setShowCouncil] = useState(false)
   const [showAutopilot, setShowAutopilot] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
+  const [showGithubImport, setShowGithubImport] = useState(false)
   const [projectsRevision, setProjectsRevision] = useState(0)
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() =>
     getActiveWorkspaceId(),
@@ -1626,6 +1628,17 @@ export default function App() {
     if (next === mode) return
     setMode(next)
   }
+
+  const handleGithubImport = useCallback(
+    (ws: SavedWorkspace) => {
+      upsertWorkspace(ws)
+      loadWorkspaceIntoApp(ws)
+      setProjectsRevision((n) => n + 1)
+      setShowProjects(false)
+      setShowGithubImport(false)
+    },
+    [loadWorkspaceIntoApp],
+  )
 
   const openManualEdit = useCallback(() => {
     if (!hasBuilt) {
@@ -2877,6 +2890,13 @@ export default function App() {
         onNewProject={startNewSession}
         onSaveCurrent={saveCurrentProject}
         onLibraryChange={() => setProjectsRevision((n) => n + 1)}
+        onConnectGithub={() => setShowGithubImport(true)}
+      />
+
+      <GithubImportPanel
+        open={showGithubImport}
+        onClose={() => setShowGithubImport(false)}
+        onImported={handleGithubImport}
       />
 
       <GalleryPanel

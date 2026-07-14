@@ -18,6 +18,7 @@ import {
   Pencil,
   Check,
   Cloud,
+  FolderGit2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -45,6 +46,7 @@ interface ProjectsLibraryPanelProps {
   onNewProject: () => void
   onSaveCurrent: () => SavedWorkspace | null
   onLibraryChange?: () => void
+  onConnectGithub?: () => void
 }
 
 const STATUS_STYLES: Record<WorkspaceStatus, string> = {
@@ -74,6 +76,7 @@ export function ProjectsLibraryPanel({
   onNewProject,
   onSaveCurrent,
   onLibraryChange,
+  onConnectGithub,
 }: ProjectsLibraryPanelProps) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterTab>('all')
@@ -198,6 +201,13 @@ export function ProjectsLibraryPanel({
                   className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl border border-[#7dd3fc]/35 bg-[#7dd3fc]/10 text-[13px] font-semibold text-[#7dd3fc] hover:opacity-90"
                 >
                   <Plus size={15} /> New project
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onConnectGithub?.()}
+                  className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl border border-[#e8e8f0]/25 bg-[#e8e8f0]/08 text-[13px] font-semibold text-[#e8e8f0] hover:bg-[#e8e8f0]/12"
+                >
+                  <FolderGit2 size={15} /> Connect to GitHub
                 </button>
                 <button
                   type="button"
