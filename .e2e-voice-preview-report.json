@@ -1,0 +1,91 @@
+{
+  "at": "2026-07-14T16:21:25.857Z",
+  "BASE": "http://localhost:5173",
+  "API": "http://localhost:3001",
+  "results": [
+    {
+      "name": "Grok API live",
+      "ok": true,
+      "detail": "model=grok-3 source=server"
+    },
+    {
+      "name": "Voice token (Grok Voice Agent)",
+      "ok": true,
+      "detail": "token len=107"
+    },
+    {
+      "name": "Voice-style plan turn 1",
+      "ok": true,
+      "detail": "Voice input is smart.  consultants live on calls.  Kill any manual editing or categories in v1.…"
+    },
+    {
+      "name": "Voice-style plan turn 2 (user answers)",
+      "ok": true,
+      "detail": "Solo freelancers, voice after calls, clean card to client. That's the only loop that survives. Want …"
+    },
+    {
+      "name": "Text guidance turn 3 (improvement suggestions)",
+      "ok": true,
+      "detail": "I'd kill any editing or formatting tools in v1. The premium feel comes from the AI just getting it right the first time.…"
+    },
+    {
+      "name": "Voice-style turn 4 (continual improvements)",
+      "ok": true,
+      "detail": "Locked. Dark premium UI, voice to perfect card, shareable timeline. Say build it.…"
+    },
+    {
+      "name": "Local native scaffold from plan (preview-safe)",
+      "ok": true,
+      "detail": "name=Voice-first client update timeline for ind"
+    },
+    {
+      "name": "Live /api/build upgrade",
+      "ok": true,
+      "optional": true,
+      "detail": "soft-skip: no parsed files"
+    },
+    {
+      "name": "UI e2e: plan → build → live preview + refine guidance",
+      "ok": true,
+      "detail": "preview OK: IdeaSpeak.dev Live Grok · plan → build → ship Real Grok CALL OFF Plan Build Focu…"
+    },
+    {
+      "name": "Post-preview voice suggestions loop (3 turns)",
+      "ok": true,
+      "detail": "1:Add a subtle timestamp and call length to each car | 2:Second angle: auto-detect the client's name from t | 3:Empty state gets a one-tap record prompt with a sa"
+    }
+  ],
+  "log": [
+    {
+      "turn": 1,
+      "mode": "voice",
+      "reply": "Voice input is smart.  consultants live on calls.  Kill any manual editing or categories in v1."
+    },
+    {
+      "turn": 2,
+      "mode": "voice",
+      "reply": "Solo freelancers, voice after calls, clean card to client. That's the only loop that survives. Want the live preview?"
+    },
+    {
+      "turn": 3,
+      "mode": "text",
+      "reply": "I'd kill any editing or formatting tools in v1. The premium feel comes from the AI just getting it right the first time.\n\nOne wow moment: the card lands with perfect tone, bullet points, and a single suggested next step, all under ten seconds. One cut: no client accounts or logins, just a shareable link.\n\nWant the tight v1 plan locked so we can build the preview?"
+    },
+    {
+      "turn": 4,
+      "mode": "voice",
+      "reply": "Locked. Dark premium UI, voice to perfect card, shareable timeline. Say build it."
+    },
+    {
+      "ui": "after improve prompt",
+      "snippet": "IdeaSpeak.dev\nLive Grok · plan → build → ship\nReal Grok\nCALL OFF\nPlan\nBuild\nFocus chat\nFree\n25 left\n1 · Plan\n2 · Ready\n3 · Preview\n4 · Ship\nHey — I'm Grok. Tap the mic for a real voice call with me (n"
+    },
+    {
+      "continuousImprovements": [
+        "Add a subtle timestamp and call length to each card so it feels real-time. Lock that next?",
+        "Second angle: auto-detect the client's name from the voice note and tag the card so the timeline stays organized without extra effort. Lock that?",
+        "Empty state gets a one-tap record prompt with a sample client card. Mobile needs that or it feels like a website. Lock?"
+      ]
+    }
+  ]
+}

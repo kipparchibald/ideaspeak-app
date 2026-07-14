@@ -8,6 +8,8 @@ IdeaSpeak is the voice-first app builder that turns messy spoken ideas into beau
 
 > Built by Kipp Archibald. Designed to be better than generic prompt-to-app tools through engineered voice refinement and production-first agent prompts.
 
+> **Product boundary:** IdeaSpeak is only the voice → app builder. **SummitForge RE OS** is a separate product/repo — do not treat them as one app.
+
 ---
 
 ## Why IdeaSpeak

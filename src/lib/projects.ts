@@ -1,5 +1,7 @@
 /** Local project suite — full workspace snapshots for resume-where-you-left-off */
 
+import { getSupabase, getSupabaseUser, isSupabaseConfigured } from './supabase'
+
 export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant'
@@ -257,4 +259,206 @@ export const STATUS_LABELS: Record<WorkspaceStatus, string> = {
   discussing: 'Discussing',
   planned: 'Plan ready',
   built: 'Built',
+}
+
+// ── Cloud sync (Sprint 4) — offline-first; sync when signed in ───────────────
+
+export type CloudSyncFailureReason = 'not_configured' | 'not_authenticated' | 'error'
+
+export type CloudSyncResult =
+  | { ok: true; synced: number }
+  | { ok: false; reason: CloudSyncFailureReason; message?: string }
+
+export type CloudLoadResult =
+  | { ok: true; workspaces: SavedWorkspace[] }
+  | { ok: false; reason: CloudSyncFailureReason; message?: string }
+
+/** Metadata stored in projects.conversation_json (files live in files_json). */
+interface WorkspaceCloudMeta {
+  summary: string
+  status: WorkspaceStatus
+  mode: 'discuss' | 'build'
+  createdAt: string
+  conversation: ConversationMessage[]
+  transcript: string
+  buildPlan: BuildScaffoldPlan | null
+  currentProject: Omit<CurrentProject, 'files'> | null
+  selectedPersonality: string
+  proactiveSuggestions: string[]
+}
+
+interface ProjectRow {
+  id: string
+  user_id: string
+  name: string
+  files_json: ProjectFile
+  conversation_json: WorkspaceCloudMeta
+  updated_at: string
+}
+
+function workspaceToCloudRow(workspace: SavedWorkspace, userId: string): ProjectRow {
+  const meta: WorkspaceCloudMeta = {
+    summary: workspace.summary,
+    status: workspace.status,
+    mode: workspace.mode,
+    createdAt: workspace.createdAt,
+    conversation: workspace.conversation,
+    transcript: workspace.transcript,
+    buildPlan: workspace.buildPlan,
+    currentProject: workspace.currentProject
+      ? {
+          id: workspace.currentProject.id,
+          name: workspace.currentProject.name,
+          brief: workspace.currentProject.brief,
+          optimizedPrompt: workspace.currentProject.optimizedPrompt,
+          transcript: workspace.currentProject.transcript,
+        }
+      : null,
+    selectedPersonality: workspace.selectedPersonality,
+    proactiveSuggestions: workspace.proactiveSuggestions,
+  }
+
+  return {
+    id: workspace.id,
+    user_id: userId,
+    name: workspace.name,
+    files_json: workspace.currentProject?.files ?? {},
+    conversation_json: meta,
+    updated_at: workspace.updatedAt,
+  }
+}
+
+function cloudRowToWorkspace(row: ProjectRow): SavedWorkspace {
+  const meta = row.conversation_json
+  const currentProject: CurrentProject | null = meta.currentProject
+    ? {
+        ...meta.currentProject,
+        files: row.files_json ?? {},
+      }
+    : null
+
+  return {
+    id: row.id,
+    name: row.name,
+    summary: meta.summary,
+    status: meta.status,
+    mode: meta.mode,
+    createdAt: meta.createdAt,
+    updatedAt: row.updated_at,
+    conversation: meta.conversation ?? [],
+    transcript: meta.transcript ?? '',
+    buildPlan: meta.buildPlan ?? null,
+    currentProject,
+    selectedPersonality: meta.selectedPersonality ?? 'grok',
+    proactiveSuggestions: meta.proactiveSuggestions ?? [],
+  }
+}
+
+/** Push one workspace to Supabase. No-op when unconfigured or signed out. */
+export async function saveWorkspaceToCloud(workspace: SavedWorkspace): Promise<CloudSyncResult> {
+  if (!isSupabaseConfigured) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const supabase = getSupabase()
+  if (!supabase) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const user = await getSupabaseUser()
+  if (!user) {
+    return { ok: false, reason: 'not_authenticated' }
+  }
+
+  const row = workspaceToCloudRow(workspace, user.id)
+  const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' })
+
+  if (error) {
+    return { ok: false, reason: 'error', message: error.message }
+  }
+
+  return { ok: true, synced: 1 }
+}
+
+/** Push all local workspaces to Supabase (e.g. after first login). */
+export async function saveAllWorkspacesToCloud(): Promise<CloudSyncResult> {
+  if (!isSupabaseConfigured) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const supabase = getSupabase()
+  if (!supabase) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const user = await getSupabaseUser()
+  if (!user) {
+    return { ok: false, reason: 'not_authenticated' }
+  }
+
+  const local = listWorkspaces()
+  if (local.length === 0) {
+    return { ok: true, synced: 0 }
+  }
+
+  const rows = local.map((ws) => workspaceToCloudRow(ws, user.id))
+  const { error } = await supabase.from('projects').upsert(rows, { onConflict: 'id' })
+
+  if (error) {
+    return { ok: false, reason: 'error', message: error.message }
+  }
+
+  return { ok: true, synced: rows.length }
+}
+
+/** Load workspaces from Supabase for the signed-in user. */
+export async function loadWorkspacesFromCloud(): Promise<CloudLoadResult> {
+  if (!isSupabaseConfigured) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const supabase = getSupabase()
+  if (!supabase) {
+    return { ok: false, reason: 'not_configured' }
+  }
+
+  const user = await getSupabaseUser()
+  if (!user) {
+    return { ok: false, reason: 'not_authenticated' }
+  }
+
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, user_id, name, files_json, conversation_json, updated_at')
+    .eq('user_id', user.id)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    return { ok: false, reason: 'error', message: error.message }
+  }
+
+  const workspaces = (data as ProjectRow[] | null)?.map(cloudRowToWorkspace) ?? []
+  return { ok: true, workspaces }
+}
+
+/**
+ * Merge cloud workspaces into local storage (offline-first).
+ * Cloud wins when updated_at is newer; local-only rows are kept.
+ */
+export async function syncWorkspacesFromCloud(): Promise<CloudSyncResult> {
+  const loaded = await loadWorkspacesFromCloud()
+  if (!loaded.ok) return loaded
+
+  const localById = new Map(listWorkspaces().map((ws) => [ws.id, ws]))
+  let merged = 0
+
+  for (const remote of loaded.workspaces) {
+    const local = localById.get(remote.id)
+    if (!local || new Date(remote.updatedAt).getTime() > new Date(local.updatedAt).getTime()) {
+      upsertWorkspace(remote)
+      merged += 1
+    }
+  }
+
+  return { ok: true, synced: merged }
 }

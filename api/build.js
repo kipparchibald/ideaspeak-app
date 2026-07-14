@@ -1,7 +1,7 @@
 import { jsonrepair } from 'jsonrepair'
 import { BUILD_SYSTEM } from './build-prompt.js'
 import { getApiKey } from './xai.js'
-import { corsHeaders, isAllowedOrigin } from './security.js'
+import { corsHeaders, isAllowedOrigin, rejectRateLimitedNode } from './security.js'
 
 /** Node runtime — grok-build needs >60s; Edge times out */
 export const config = { maxDuration: 120 }
@@ -39,6 +39,10 @@ export default async function handler(req, res) {
   const origin = req.headers.origin || ''
   if (origin && !isAllowedOrigin(origin)) {
     return res.status(403).json({ error: 'Forbidden origin' })
+  }
+
+  if (req.method === 'POST' && rejectRateLimitedNode(req, res)) {
+    return
   }
 
   if (req.method !== 'POST') {

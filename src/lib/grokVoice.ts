@@ -1,57 +1,82 @@
-// Grok Voice Agent — WebSocket client for real-time speech-to-speech
-// Uses ephemeral tokens so XAI_API_KEY never touches the browser
+// Grok Voice Agent — real-time speech-to-speech via xAI Realtime WebSocket
 // Docs: https://docs.x.ai/developers/model-capabilities/audio/voice-agent
 
 export type VoiceId =
-  | 'eve' | 'ara' | 'leo' | 'rex' | 'sal'
-  | 'iris' | 'luna' | 'helix' | 'orion' | 'rigel'
-  | 'celeste' | 'cosmo' | 'kepler' | 'lumen' | 'sirius'
+  | 'eve'
+  | 'ara'
+  | 'leo'
+  | 'rex'
+  | 'sal'
+  | 'iris'
+  | 'luna'
+  | 'helix'
+  | 'orion'
+  | 'rigel'
+  | 'celeste'
+  | 'cosmo'
+  | 'kepler'
+  | 'lumen'
+  | 'sirius'
+
+export type GrokVoiceState =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'error'
 
 export interface GrokVoiceOptions {
   voice?: VoiceId
   instructions?: string
-  onTranscript?: (text: string, isFinal: boolean) => void
-  onAudio?: (chunk: ArrayBuffer) => void
+  /** User speech transcript */
+  onUserTranscript?: (text: string, isFinal: boolean) => void
+  /** Grok spoken reply as text (when available) */
+  onAssistantTranscript?: (text: string, isFinal: boolean) => void
   onStateChange?: (state: GrokVoiceState) => void
   onError?: (err: string) => void
+  /** @deprecated use onUserTranscript */
+  onTranscript?: (text: string, isFinal: boolean) => void
 }
 
-export type GrokVoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error'
+export const IDEASPEAK_VOICE_INSTRUCTIONS = `You are Grok from xAI — sharp, truth-seeking, a little irreverent — co-building products inside IdeaSpeak.
 
-const IDEASPEAK_INSTRUCTIONS = `You are IdeaSpeak, a voice-first AI product strategist and app builder powered by Grok.
-
-Your job: Help users turn spoken ideas into real web apps through natural conversation.
+You are on a LIVE VOICE CALL with the founder. Not a chatbot. Not customer support.
 
 Personality:
-- Direct, smart, enthusiastic — like a brilliant technical co-founder
-- Ask ONE sharp clarifying question at a time
-- Celebrate good ideas, challenge weak ones honestly
-- Keep responses SHORT and conversational for voice — 2-4 sentences max
-- End most turns with a question to keep the dialogue flowing
+- Sound like Grok: direct, witty, zero corporate fluff
+- Short spoken answers: 1–3 sentences unless they ask for more
+- Contractions speech. Natural pauses. Dry humor OK
+- Never say "I'd be happy to", "Great question", "Absolutely", "How can I help"
 
-When a user describes an app idea:
-1. Confirm you understood it in one sentence
-2. Ask the single most important clarifying question
-3. After 3-4 exchanges, summarize the plan and say "Ready to build — want me to generate it?"
+Job this call:
+- Collaborate on a ruthless v1 product plan
+- Never parrot their idea back at them
+- Lead with an opinion, then one sharp question
+- Lock: who it's for, daily core loop, wow moment, what to cut
+- When the plan is solid, say they can say "build it" for a live preview on screen
+- Do not claim you already pushed code or deployed
 
-You have access to web search. Use it when the user asks about competitors, tech options, or current tools.
-
-Voice style: Speak naturally, use contractions, vary rhythm. No bullet points or lists — this is a spoken conversation.`
+If they say "build it" / "let's build" / "go ahead and build", confirm you'll hand off to the builder for a live preview and keep the vibe high.`
 
 export class GrokVoiceAgent {
   private ws: WebSocket | null = null
   private audioContext: AudioContext | null = null
+  private playbackContext: AudioContext | null = null
   private mediaStream: MediaStream | null = null
   private scriptProcessor: ScriptProcessorNode | null = null
   private audioQueue: ArrayBuffer[] = []
   private isPlayingAudio = false
   private state: GrokVoiceState = 'idle'
   private opts: GrokVoiceOptions
+  private assistantBuf = ''
+  private userBuf = ''
+  private nextPlayTime = 0
 
   constructor(opts: GrokVoiceOptions = {}) {
     this.opts = {
       voice: 'eve',
-      instructions: IDEASPEAK_INSTRUCTIONS,
+      instructions: IDEASPEAK_VOICE_INSTRUCTIONS,
       ...opts,
     }
   }
@@ -61,141 +86,277 @@ export class GrokVoiceAgent {
     this.opts.onStateChange?.(s)
   }
 
-  getState() { return this.state }
-
-  // ── Get ephemeral token from our Bun backend ───────────────────────────────
-  private async getEphemeralToken(): Promise<string> {
-    const res = await fetch('/api/voice/token', { method: 'POST' })
-    if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`)
-    const data = await res.json()
-    // xAI returns { client_secret: { value: "..." } }
-    return data.client_secret?.value || data.token
+  getState() {
+    return this.state
   }
 
-  // ── Connect to Grok Voice Agent ────────────────────────────────────────────
-  async connect() {
+  private async getEphemeralToken(): Promise<string> {
+    const res = await fetch('/api/voice/token', { method: 'POST' })
+    const data = await res.json().catch(() => ({} as any))
+    if (!res.ok) {
+      throw new Error(
+        data.error ||
+          data.message ||
+          `Voice token failed (${res.status}). Is XAI_API_KEY set on the server?`,
+      )
+    }
+    const token =
+      data.client_secret?.value ||
+      data.value ||
+      data.token ||
+      data.client_secret
+    if (!token || typeof token !== 'string') {
+      throw new Error('Voice token response missing client_secret')
+    }
+    return token
+  }
+
+  async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) return
     this.setState('connecting')
 
     try {
       const token = await this.getEphemeralToken()
 
-      // Browser WebSocket auth: pass token as subprotocol with prefix
-      this.ws = new WebSocket(
-        'wss://api.x.ai/v1/realtime?model=grok-voice-latest',
-        [`xai-client-secret.${token}`]
-      )
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(
+          'wss://api.x.ai/v1/realtime?model=grok-voice-latest',
+          [`xai-client-secret.${token}`],
+        )
+        this.ws = ws
+        ws.binaryType = 'arraybuffer'
 
-      this.ws.onopen = () => {
-        // Configure the session
-        this.ws!.send(JSON.stringify({
-          type: 'session.update',
-          session: {
-            voice: this.opts.voice || 'eve',
-            instructions: this.opts.instructions,
-            turn_detection: { type: 'server_vad' },
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            tools: [
-              { type: 'web_search' },
-            ],
-          },
-        }))
-        this.setState('listening')
-        this.startMicrophone()
-      }
+        const timeout = window.setTimeout(() => {
+          reject(new Error('Grok Voice connection timed out'))
+        }, 15000)
 
-      this.ws.onmessage = (e) => this.handleEvent(JSON.parse(e.data))
+        ws.onopen = () => {
+          ws.send(
+            JSON.stringify({
+              type: 'session.update',
+              session: {
+                voice: this.opts.voice || 'eve',
+                instructions: this.opts.instructions || IDEASPEAK_VOICE_INSTRUCTIONS,
+                turn_detection: {
+                  type: 'server_vad',
+                  threshold: 0.5,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 600,
+                },
+                input_audio_format: 'pcm16',
+                output_audio_format: 'pcm16',
+                input_audio_transcription: { model: 'whisper-1' },
+                tools: [{ type: 'web_search' }, { type: 'x_search' }],
+              },
+            }),
+          )
+          void this.startMicrophone()
+            .then(() => {
+              window.clearTimeout(timeout)
+              resolve()
+            })
+            .catch((err) => {
+              window.clearTimeout(timeout)
+              reject(err)
+            })
+        }
 
-      this.ws.onerror = () => {
-        this.setState('error')
-        this.opts.onError?.('WebSocket connection failed. Check your xAI key.')
-      }
+        ws.onmessage = (e) => {
+          try {
+            if (typeof e.data === 'string') this.handleEvent(JSON.parse(e.data))
+          } catch {
+            /* ignore */
+          }
+        }
 
-      this.ws.onclose = () => {
-        if (this.state !== 'idle') this.setState('idle')
-      }
+        ws.onerror = () => {
+          window.clearTimeout(timeout)
+          this.opts.onError?.('WebSocket error talking to Grok Voice')
+          this.setState('error')
+          reject(new Error('WebSocket error'))
+        }
 
+        ws.onclose = () => {
+          this.cleanupMedia()
+          if (this.state !== 'idle') this.setState('idle')
+        }
+      })
     } catch (err: any) {
       this.setState('error')
       this.opts.onError?.(err.message || 'Failed to connect to Grok Voice')
+      throw err
     }
   }
 
-  // ── Handle incoming WebSocket events ──────────────────────────────────────
   private handleEvent(event: any) {
     switch (event.type) {
       case 'session.created':
       case 'session.updated':
+        if (this.state === 'connecting') this.setState('listening')
         break
 
-      // Transcript updates (what the user said)
-      case 'conversation.item.input_audio_transcription.updated':
-        this.opts.onTranscript?.(event.transcript || '', false)
-        break
-      case 'conversation.item.input_audio_transcription.completed':
-        this.opts.onTranscript?.(event.transcript || '', true)
+      case 'input_audio_buffer.speech_started':
+        this.setState('listening')
         break
 
-      // Grok is thinking
-      case 'response.created':
+      case 'input_audio_buffer.speech_stopped':
         this.setState('thinking')
         break
 
-      // Audio coming back from Grok
+      // User transcripts (several event name variants across protocol versions)
+      case 'conversation.item.input_audio_transcription.delta':
+      case 'conversation.item.input_audio_transcription.updated': {
+        const t = event.delta || event.transcript || ''
+        if (t) {
+          this.userBuf += t
+          this.emitUser(this.userBuf, false)
+        }
+        break
+      }
+      case 'conversation.item.input_audio_transcription.completed': {
+        const t = event.transcript || this.userBuf
+        this.userBuf = ''
+        if (t) this.emitUser(t, true)
+        break
+      }
+
+      case 'response.created':
+        this.assistantBuf = ''
+        this.setState('thinking')
+        break
+
+      // Assistant text (when provided alongside audio)
+      case 'response.audio_transcript.delta':
+      case 'response.output_audio_transcript.delta': {
+        const d = event.delta || ''
+        this.assistantBuf += d
+        this.opts.onAssistantTranscript?.(this.assistantBuf, false)
+        break
+      }
+      case 'response.audio_transcript.done':
+      case 'response.output_audio_transcript.done': {
+        const t = event.transcript || this.assistantBuf
+        this.assistantBuf = ''
+        if (t) this.opts.onAssistantTranscript?.(t, true)
+        break
+      }
+
+      // Audio from Grok
       case 'response.output_audio.delta':
+      case 'response.audio.delta':
         this.setState('speaking')
         if (event.delta) {
-          const bytes = Uint8Array.from(atob(event.delta), c => c.charCodeAt(0))
-          this.enqueueAudio(bytes.buffer)
+          try {
+            const bytes = this.b64ToArrayBuffer(event.delta)
+            this.enqueueAudio(bytes)
+          } catch {
+            /* ignore bad chunk */
+          }
         }
         break
 
       case 'response.output_audio.done':
-        // Audio finished — go back to listening
-        this.flushAudioQueue().then(() => {
-          if (this.state === 'speaking') this.setState('listening')
-        })
+      case 'response.audio.done':
         break
 
       case 'response.done':
+        if (this.assistantBuf) {
+          this.opts.onAssistantTranscript?.(this.assistantBuf, true)
+          this.assistantBuf = ''
+        }
+        // Return to listening after audio drains
+        void this.whenPlaybackIdle().then(() => {
+          if (this.state === 'speaking' || this.state === 'thinking') {
+            this.setState('listening')
+          }
+        })
         break
 
       case 'error':
-        this.opts.onError?.(event.error?.message || 'Grok Voice error')
+        this.opts.onError?.(event.error?.message || event.message || 'Grok Voice error')
         this.setState('error')
         break
     }
   }
 
-  // ── Microphone capture → PCM16 → WebSocket ─────────────────────────────────
+  private emitUser(text: string, isFinal: boolean) {
+    this.opts.onUserTranscript?.(text, isFinal)
+    this.opts.onTranscript?.(text, isFinal)
+  }
+
+  private b64ToArrayBuffer(b64: string): ArrayBuffer {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return bytes.buffer
+  }
+
+  private arrayBufferToB64(buf: ArrayBuffer): string {
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    }
+    return btoa(binary)
+  }
+
   private async startMicrophone() {
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
       this.audioContext = new AudioContext({ sampleRate: 24000 })
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume()
+      }
 
       const source = this.audioContext.createMediaStreamSource(this.mediaStream)
-      // ScriptProcessor is deprecated but still widest-supported for raw PCM
       this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1)
 
       this.scriptProcessor.onaudioprocess = (e) => {
         if (this.ws?.readyState !== WebSocket.OPEN) return
-        if (this.state === 'speaking') return // don't send mic during playback
+        // Mute uplink while Grok is talking to reduce echo
+        if (this.state === 'speaking') return
 
         const float32 = e.inputBuffer.getChannelData(0)
         const pcm16 = this.float32ToPcm16(float32)
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)))
+        const b64 = this.arrayBufferToB64(pcm16.buffer as ArrayBuffer)
 
-        this.ws.send(JSON.stringify({
-          type: 'input_audio_buffer.append',
-          audio: b64,
-        }))
+        this.ws.send(
+          JSON.stringify({
+            type: 'input_audio_buffer.append',
+            audio: b64,
+          }),
+        )
       }
 
       source.connect(this.scriptProcessor)
-      this.scriptProcessor.connect(this.audioContext.destination)
+      // Keep processor alive without feedback squeal
+      const mute = this.audioContext.createGain()
+      mute.gain.value = 0
+      this.scriptProcessor.connect(mute)
+      mute.connect(this.audioContext.destination)
+
+      this.setState('listening')
+
+      // Grok greets first so the user hears real Grok voice immediately
+      this.ws?.send(
+        JSON.stringify({
+          type: 'response.create',
+          response: {
+            modalities: ['audio', 'text'],
+            instructions:
+              'Greet briefly as Grok (one short sentence). Ask who the product is for and what they do every day. No corporate fluff.',
+          },
+        }),
+      )
     } catch (err: any) {
-      this.opts.onError?.('Microphone access denied: ' + err.message)
+      this.opts.onError?.('Microphone access denied: ' + (err.message || err))
       this.setState('error')
     }
   }
@@ -204,15 +365,24 @@ export class GrokVoiceAgent {
     const pcm = new Int16Array(float32.length)
     for (let i = 0; i < float32.length; i++) {
       const s = Math.max(-1, Math.min(1, float32[i]))
-      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff
     }
     return pcm
   }
 
-  // ── Audio playback queue ───────────────────────────────────────────────────
   private enqueueAudio(buffer: ArrayBuffer) {
     this.audioQueue.push(buffer)
-    if (!this.isPlayingAudio) this.playNextChunk()
+    if (!this.isPlayingAudio) void this.playNextChunk()
+  }
+
+  private async ensurePlaybackContext() {
+    if (!this.playbackContext) {
+      this.playbackContext = new AudioContext({ sampleRate: 24000 })
+    }
+    if (this.playbackContext.state === 'suspended') {
+      await this.playbackContext.resume()
+    }
+    return this.playbackContext
   }
 
   private async playNextChunk() {
@@ -224,72 +394,102 @@ export class GrokVoiceAgent {
     const chunk = this.audioQueue.shift()!
 
     try {
-      if (!this.audioContext) return
-      // PCM16 at 24kHz → AudioBuffer
+      const ctx = await this.ensurePlaybackContext()
       const pcm16 = new Int16Array(chunk)
-      const audioBuffer = this.audioContext.createBuffer(1, pcm16.length, 24000)
+      const audioBuffer = ctx.createBuffer(1, pcm16.length, 24000)
       const channel = audioBuffer.getChannelData(0)
       for (let i = 0; i < pcm16.length; i++) {
         channel[i] = pcm16[i] / 0x8000
       }
-      const source = this.audioContext.createBufferSource()
+      const source = ctx.createBufferSource()
       source.buffer = audioBuffer
-      source.connect(this.audioContext.destination)
-      source.onended = () => this.playNextChunk()
-      source.start()
+      source.connect(ctx.destination)
+      const startAt = Math.max(ctx.currentTime, this.nextPlayTime)
+      source.start(startAt)
+      this.nextPlayTime = startAt + audioBuffer.duration
+      source.onended = () => {
+        void this.playNextChunk()
+      }
     } catch {
-      this.playNextChunk()
+      void this.playNextChunk()
     }
   }
 
-  private async flushAudioQueue() {
-    // Wait until queue drains
-    return new Promise<void>(resolve => {
+  private whenPlaybackIdle(): Promise<void> {
+    return new Promise((resolve) => {
       const check = () => {
         if (!this.isPlayingAudio && this.audioQueue.length === 0) resolve()
-        else setTimeout(check, 100)
+        else setTimeout(check, 80)
       }
       check()
     })
   }
 
-  // ── Send text message (for hybrid text+voice mode) ─────────────────────────
   sendText(text: string) {
     if (this.ws?.readyState !== WebSocket.OPEN) return
-    this.ws.send(JSON.stringify({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text }],
-      },
-    }))
+    this.ws.send(
+      JSON.stringify({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text }],
+        },
+      }),
+    )
     this.ws.send(JSON.stringify({ type: 'response.create' }))
   }
 
-  // ── Disconnect ─────────────────────────────────────────────────────────────
-  disconnect() {
-    this.scriptProcessor?.disconnect()
-    this.audioContext?.close()
-    this.mediaStream?.getTracks().forEach(t => t.stop())
-    this.ws?.close()
-    this.ws = null
-    this.audioContext = null
-    this.mediaStream = null
+  private cleanupMedia() {
+    try {
+      this.scriptProcessor?.disconnect()
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.mediaStream?.getTracks().forEach((t) => t.stop())
+    } catch {
+      /* ignore */
+    }
+    try {
+      void this.audioContext?.close()
+    } catch {
+      /* ignore */
+    }
+    try {
+      void this.playbackContext?.close()
+    } catch {
+      /* ignore */
+    }
     this.scriptProcessor = null
+    this.mediaStream = null
+    this.audioContext = null
+    this.playbackContext = null
     this.audioQueue = []
     this.isPlayingAudio = false
+    this.nextPlayTime = 0
+  }
+
+  disconnect() {
+    this.cleanupMedia()
+    try {
+      this.ws?.close()
+    } catch {
+      /* ignore */
+    }
+    this.ws = null
     this.setState('idle')
   }
 
-  // ── Change voice mid-session ───────────────────────────────────────────────
   setVoice(voice: VoiceId) {
     this.opts.voice = voice
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'session.update',
-        session: { voice },
-      }))
+      this.ws.send(
+        JSON.stringify({
+          type: 'session.update',
+          session: { voice },
+        }),
+      )
     }
   }
 }

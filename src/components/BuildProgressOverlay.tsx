@@ -1,15 +1,22 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Brain, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Brain, Sparkles, CheckCircle2, AlertCircle, X, RotateCcw } from 'lucide-react'
 import type { BuildProgressSnapshot } from '../lib/build-progress'
 import { formatLogTimestamp } from '../lib/build-progress'
 
 interface BuildProgressOverlayProps {
   visible: boolean
   progress: BuildProgressSnapshot
+  onCancel?: () => void
+  onRetry?: () => void
 }
 
-export function BuildProgressOverlay({ visible, progress }: BuildProgressOverlayProps) {
+export function BuildProgressOverlay({
+  visible,
+  progress,
+  onCancel,
+  onRetry,
+}: BuildProgressOverlayProps) {
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -94,6 +101,31 @@ export function BuildProgressOverlay({ visible, progress }: BuildProgressOverlay
             </div>
           )}
         </div>
+
+        {(isWorking || isError) && (
+          <div className="px-4 py-3 border-t border-[#1f1f27] flex items-center justify-end gap-2">
+            {isWorking && onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#2a2a35] bg-[#14141c] text-[12px] font-semibold text-[#aaa] hover:text-[#e8e8f0] hover:border-[#444] transition-colors"
+              >
+                <X size={14} />
+                Cancel build
+              </button>
+            )}
+            {isError && onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#00ff88] text-[#0a0a0f] text-[12px] font-bold hover:opacity-90 transition-opacity"
+              >
+                <RotateCcw size={14} />
+                Try again
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="px-4 py-2 border-t border-[#1f1f27] text-[10px] text-[#555] flex justify-between">
           <span>Grok Build · IdeaSpeak</span>

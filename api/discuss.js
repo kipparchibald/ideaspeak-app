@@ -1,6 +1,6 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 import { chatCompletion, getApiKey, xaiError } from './xai.js'
-import { corsHeaders, rejectBlockedOrigin } from './security.js'
+import { corsHeaders, rejectBlockedOrigin, rejectRateLimited } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -11,6 +11,9 @@ export default async function handler(req) {
 
   const blocked = rejectBlockedOrigin(req)
   if (blocked) return blocked
+
+  const limited = rejectRateLimited(req)
+  if (limited) return limited
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
@@ -41,8 +44,8 @@ export default async function handler(req) {
 
   const { ok, data } = await chatCompletion(apiKey, {
     messages: fullMessages,
-    temperature: isVoice ? 0.92 : 0.78,
-    maxTokens: isVoice ? 165 : 1200,
+    temperature: isVoice ? 0.95 : 0.85,
+    maxTokens: isVoice ? 180 : 1200,
     reasoningEffort: isVoice ? 'none' : 'low',
   })
 
@@ -53,9 +56,28 @@ export default async function handler(req) {
     })
   }
 
-  let content = data.choices?.[0]?.message?.content || ''
-  if (voiceMode) {
+  let content =
+    data.choices?.[0]?.message?.content ||
+    data.choices?.[0]?.message?.reasoning_content ||
+    ''
+  if (typeof content !== 'string') content = ''
+  content = content.trim()
+
+  if (voiceMode && content) {
     content = humanizeVoiceReply(content)
+  }
+
+  if (!content) {
+    return new Response(
+      JSON.stringify({
+        error: 'Empty model response — try again or check model access',
+        content: '',
+      }),
+      {
+        status: 502,
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      },
+    )
   }
 
   return new Response(JSON.stringify({ content, voiceMode: !!voiceMode }), {

@@ -2,6 +2,8 @@
 
 This is the source of the IdeaSpeak voice-to-production xAI app builder.
 
+**Scope boundary:** IdeaSpeak ≠ SummitForge. SummitForge is a separate real-estate operating system repo. Keep products, docs, and agent work fully separate.
+
 ## Key files
 - prompts/IdeaSpeak-Voice-Refiner-Prompt.md
 - prompts/IdeaSpeak-xAI-Agent-System-Prompt.md

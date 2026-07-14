@@ -1,28 +1,141 @@
-// Phase 1: Real Sandbox integration stub
-// In full implementation:
-// - Use E2B (e2b.dev) or Daytona or self-hosted container runtime
-// - Expose methods: createSandbox(), writeFile(path, content), runCommand(cmd), getPreviewUrl(), getLogs()
-// - Agent uses these tools via xAI tool calling to actually build, install, test, debug the project
-// - Preview pane becomes <iframe src={sandbox.previewUrl} /> instead of (or alongside) Sandpack
-// - This closes the "preview vs reality" gap that plagues Lovable/Bolt/etc.
+// E2B real sandbox client — calls Bun backend routes (Railway in prod, Vite proxy locally)
 
-export async function createSandbox(projectName: string) {
-  console.log('[SANDBOX STUB] Would create real execution environment for', projectName);
-  // return { id: '...', previewUrl: 'https://...', terminal: ... }
-  return { id: 'stub-' + Date.now(), previewUrl: null, isStub: true };
+export type SandboxStatus =
+  | 'stub'
+  | 'creating'
+  | 'installing'
+  | 'starting'
+  | 'ready'
+  | 'error'
+
+export interface SandboxSession {
+  sandboxId: string
+  projectId: string
+  previewUrl: string | null
+  status: SandboxStatus
+  logs: string[]
+  isStub: boolean
+  error?: string
 }
 
-export async function writeFile(_sandboxId: string, path: string, _content: string) {
-  console.log('[SANDBOX STUB] writeFile', path);
+function apiBase(path: string): string {
+  if (typeof window !== 'undefined') return path
+  const base = process.env.IDEASPEAK_API || 'http://localhost:3001'
+  return `${base.replace(/\/$/, '')}${path}`
 }
 
-export async function runCommand(_sandboxId: string, command: string) {
-  console.log('[SANDBOX STUB] runCommand', command);
-  return { output: 'stub output for ' + command };
+async function sandboxFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ ok: boolean; data: T; status: number }> {
+  const res = await fetch(apiBase(path), {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+  })
+  const data = (await res.json().catch(() => ({}))) as T
+  return { ok: res.ok, data, status: res.status }
 }
 
-export async function getPreviewUrl(_sandboxId: string) {
-  return null; // real would return the live app URL
+/** Check if server has E2B configured */
+export async function checkSandboxAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(apiBase('/api/status'))
+    const data = await res.json().catch(() => ({} as { features?: { e2b?: boolean } }))
+    return !!data?.features?.e2b
+  } catch {
+    return false
+  }
 }
 
-// Wire this into the agent loop and UI preview toggle in Phase 1 full implementation.
+export async function createSandbox(
+  projectId: string,
+  files: Record<string, string>,
+): Promise<SandboxSession> {
+  const { ok, data, status } = await sandboxFetch<SandboxSession>('/api/sandbox/create', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, files }),
+  })
+  if (!ok) {
+    throw new Error((data as { error?: string })?.error || `Sandbox create failed (${status})`)
+  }
+  return data
+}
+
+export async function syncSandboxFiles(
+  sandboxId: string,
+  files: Record<string, string>,
+): Promise<SandboxSession> {
+  const { ok, data, status } = await sandboxFetch<SandboxSession>('/api/sandbox/sync', {
+    method: 'POST',
+    body: JSON.stringify({ sandboxId, files }),
+  })
+  if (!ok) {
+    throw new Error((data as { error?: string })?.error || `Sandbox sync failed (${status})`)
+  }
+  return data
+}
+
+export async function getSandboxPreview(sandboxId: string): Promise<{
+  previewUrl: string | null
+  status: SandboxStatus
+  logs: string[]
+}> {
+  const { ok, data, status } = await sandboxFetch<{
+    previewUrl: string | null
+    status: SandboxStatus
+    logs: string[]
+  }>('/api/sandbox/preview', {
+    method: 'POST',
+    body: JSON.stringify({ sandboxId }),
+  })
+  if (!ok) {
+    throw new Error((data as { error?: string })?.error || `Sandbox preview failed (${status})`)
+  }
+  return data
+}
+
+export async function runSandboxCommand(
+  sandboxId: string,
+  command: string,
+): Promise<{ output: string; exitCode: number; error?: string }> {
+  const { ok, data, status } = await sandboxFetch<{
+    output: string
+    exitCode: number
+    error?: string
+  }>('/api/sandbox/run', {
+    method: 'POST',
+    body: JSON.stringify({ sandboxId, command }),
+  })
+  if (!ok) {
+    throw new Error((data as { error?: string })?.error || `Sandbox run failed (${status})`)
+  }
+  return data
+}
+
+export async function destroySandbox(sandboxId: string): Promise<void> {
+  await sandboxFetch('/api/sandbox/destroy', {
+    method: 'DELETE',
+    body: JSON.stringify({ sandboxId }),
+  })
+}
+
+/** Poll until sandbox is ready or errors out */
+export async function waitForSandboxReady(
+  sandboxId: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<string | null> {
+  const intervalMs = opts.intervalMs ?? 2000
+  const timeoutMs = opts.timeoutMs ?? 180_000
+  const start = Date.now()
+
+  while (Date.now() - start < timeoutMs) {
+    const { previewUrl, status } = await getSandboxPreview(sandboxId)
+    if (status === 'ready' && previewUrl) return previewUrl
+    if (status === 'error' || status === 'stub') return previewUrl
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return null
+}

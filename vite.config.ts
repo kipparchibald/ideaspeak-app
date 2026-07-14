@@ -4,6 +4,17 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@codesandbox/sandpack')) {
+            return 'sandpack'
+          }
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       // In dev, /api/* proxies to local Bun server

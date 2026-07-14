@@ -60,7 +60,6 @@ export function setTtsEnabled(on: boolean) {
 }
 
 let currentAudio: HTMLAudioElement | null = null
-let browserUtterance: SpeechSynthesisUtterance | null = null
 
 export function stopSpeaking() {
   if (currentAudio) {
@@ -71,7 +70,6 @@ export function stopSpeaking() {
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     window.speechSynthesis.cancel()
   }
-  browserUtterance = null
 }
 
 function speakBrowser(text: string, rate = 1): Promise<void> {
@@ -85,7 +83,6 @@ function speakBrowser(text: string, rate = 1): Promise<void> {
     u.rate = rate
     u.onend = () => resolve()
     u.onerror = (e) => reject(e.error || new Error('Browser TTS failed'))
-    browserUtterance = u
     window.speechSynthesis.speak(u)
   })
 }

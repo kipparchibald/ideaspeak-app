@@ -29,15 +29,17 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
   const [xaiStatus, setXaiStatus] = useState<ApiStatus>('unknown')
   const [xaiMessage, setXaiMessage] = useState('')
   const [xaiModel, setXaiModel] = useState<string | undefined>()
+  const [xaiSource, setXaiSource] = useState<VerifyResult['source']>()
   const [verifying, setVerifying] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
 
   useEffect(() => {
     const savedXai = loadLocalXaiKey()
     const savedE2b = loadLocalE2bKey()
     setXaiKey(savedXai)
     setE2bKey(savedE2b)
-    if (savedXai) runVerify(savedXai)
-    else runVerify()
+    // Always verify: may already be live via server XAI_API_KEY with no paste needed
+    void runVerify(savedXai || undefined)
   }, [])
 
   async function runVerify(keyOverride?: string) {
@@ -48,13 +50,17 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
     setXaiStatus(result.status)
     setXaiMessage(result.message)
     setXaiModel(result.model)
+    setXaiSource(result.source)
     setVerifying(false)
     onKeySaved?.(result.status === 'live')
   }
 
   function handleSaveXai() {
-    saveLocalXaiKey(xaiKey)
-    runVerify(xaiKey)
+    const trimmed = xaiKey.trim()
+    if (!trimmed) return
+    saveLocalXaiKey(trimmed)
+    setJustSaved(true)
+    void runVerify(trimmed)
   }
 
   function handleSaveE2b() {
@@ -65,8 +71,12 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
     setXaiKey('')
     saveLocalXaiKey('')
     setXaiStatus('missing')
-    setXaiMessage('Key cleared')
+    setXaiMessage('Key cleared from this browser')
+    setXaiSource(undefined)
+    setJustSaved(false)
     onKeySaved?.(false)
+    // Re-check in case server still has a hosted key
+    void runVerify('')
   }
 
   const statusIcon = () => {
@@ -92,9 +102,25 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         <div>
           <h3 className="text-[15px] font-semibold text-[#e8e8f0]">API Connections</h3>
           <p className="text-[12px] text-[#666] mt-0.5 leading-relaxed">
-            Configure keys in one place. Keys stay on your device or securely on the server.
+            Set the key <strong className="text-[#888]">once</strong> — it stays on this device
+            (or on the server). You should not re-enter it every session.
           </p>
         </div>
+      </div>
+
+      {/* How persistence works */}
+      <div className="rounded-xl border border-[#1f1f27] bg-[#111116] px-3 py-2.5 space-y-1.5">
+        <p className="text-[11px] font-semibold text-[#888]">Never re-type — pick one path</p>
+        <p className="text-[11px] text-[#666] leading-relaxed">
+          <span className="text-[#00ff88]">Best:</span> put{' '}
+          <code className="text-[#888]">XAI_API_KEY</code> in{' '}
+          <code className="text-[#888]">.env.local</code> (local) or Vercel env (production).
+          Everyone uses Grok with no paste.
+        </p>
+        <p className="text-[11px] text-[#666] leading-relaxed">
+          <span className="text-[#00ff88]">Or:</span> Save &amp; Verify below — key is stored in
+          this browser’s localStorage until you Clear or wipe site data.
+        </p>
       </div>
 
       <div className={`rounded-2xl border p-4 transition-colors ${statusColor()}`}>
@@ -125,8 +151,26 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
           <p className="text-[11px] text-[#888] mb-3 leading-relaxed">{xaiMessage}</p>
         )}
 
-        {xaiModel && xaiStatus === 'live' && (
-          <p className="text-[11px] text-[#555] mb-3">Model: <span className="text-[#00ff88]">{xaiModel}</span></p>
+        {xaiStatus === 'live' && (
+          <p className="text-[11px] text-[#00ff88]/90 mb-3 leading-relaxed">
+            {xaiSource === 'server'
+              ? '✓ Using server key — no browser paste needed. Stays connected across sessions.'
+              : '✓ Key remembered on this device. You won’t need to paste it again here.'}
+            {xaiModel ? ` · Model: ${xaiModel}` : ''}
+          </p>
+        )}
+
+        {justSaved && xaiStatus === 'live' && xaiSource !== 'server' && (
+          <p className="text-[11px] text-[#888] mb-3">
+            Saved to browser storage (localStorage). Survives refresh and restarts of the app.
+          </p>
+        )}
+
+        {xaiStatus === 'invalid' && (
+          <p className="text-[11px] text-red-400/90 mb-3 leading-relaxed">
+            Key was rejected by xAI (expired/revoked/typo). Get a new one at console.x.ai, paste once,
+            Save &amp; Verify — it will stick on this device.
+          </p>
         )}
 
         <div className="space-y-2">
@@ -134,9 +178,23 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
             <input
               type={showXai ? 'text' : 'password'}
               value={xaiKey}
-              onChange={(e) => setXaiKey(e.target.value)}
-              placeholder="xai-…"
-              className="w-full bg-[#07070c] border border-[#1f1f27] rounded-xl px-3 py-2.5 text-[13px] text-[#e8e8f0] placeholder:text-[#444] outline-none focus:border-[#00ff88]/40 transition-colors"
+              onChange={(e) => {
+                setXaiKey(e.target.value)
+                setJustSaved(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveXai()
+              }}
+              placeholder={
+                xaiSource === 'server' && xaiStatus === 'live'
+                  ? 'Optional override (server key already live)'
+                  : loadLocalXaiKey()
+                    ? 'Key saved on this device — paste new to replace'
+                    : 'xai-… paste once, then Save'
+              }
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full bg-[#07070c] border border-[#1f1f27] rounded-xl px-3 py-2.5 text-[13px] text-[#e8e8f0] placeholder:text-[#444] outline-none focus:border-[#00ff88]/40 transition-colors font-mono"
             />
             <button
               type="button"
@@ -150,13 +208,13 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
           <div className="flex gap-2">
             <button
               onClick={handleSaveXai}
-              disabled={verifying}
+              disabled={verifying || !xaiKey.trim()}
               className="flex-1 bg-[#00ff88] text-[#0a0a0f] text-[12px] font-semibold rounded-xl py-2 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               Save & Verify
             </button>
             <button
-              onClick={() => runVerify()}
+              onClick={() => void runVerify(xaiKey || undefined)}
               disabled={verifying}
               className="px-4 border border-[#1f1f27] text-[12px] text-[#888] rounded-xl hover:border-[#333] hover:text-[#ccc] transition-colors disabled:opacity-50"
             >
@@ -229,10 +287,20 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         </a>
       </div>
 
-      <div className="rounded-xl bg-[#111116] border border-[#1f1f27] px-3 py-2.5">
+      <div className="rounded-xl bg-[#111116] border border-[#1f1f27] px-3 py-2.5 space-y-1">
         <p className="text-[10px] text-[#555] leading-relaxed">
-          <strong className="text-[#666]">Security:</strong> Client keys stay in browser localStorage only.
-          Production prefers server-side XAI_API_KEY on Vercel. Never commit keys to git.
+          <strong className="text-[#666]">Security:</strong> Browser keys live in localStorage only
+          (this site, this browser). Server keys never ship to the client.
+        </p>
+        <p className="text-[10px] text-[#555] leading-relaxed">
+          <strong className="text-[#666]">Local one-time setup:</strong>{' '}
+          <code className="text-[#666]">bun run setup:grok</code> writes{' '}
+          <code className="text-[#666]">.env.local</code> — restart{' '}
+          <code className="text-[#666]">dev:full</code>, then never paste in the UI again.
+        </p>
+        <p className="text-[10px] text-[#444] leading-relaxed">
+          You’ll only re-enter a key if you Clear it, wipe site data, use another browser/profile,
+          or the key is revoked at console.x.ai.
         </p>
       </div>
     </div>

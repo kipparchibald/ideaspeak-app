@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install chromium --with-deps
+
+      - name: Start API server
+        run: bun run server &
+
+      - name: Start preview server
+        run: bun run preview -- --port 5173 --host &
+
+      - name: Wait for servers
+        run: |
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:3001/health >/dev/null && curl -sf http://localhost:5173 >/dev/null; then
+              echo "Servers ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Servers did not become ready in time"
+          exit 1
+
+      - name: Smoke tests
+        run: bun run smoke:local

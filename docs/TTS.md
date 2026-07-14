@@ -38,4 +38,3 @@ Roughly $15 / 1M characters via xAI TTS API.
 
 - Call `speak()` from App.tsx wherever assistant messages are appended
 - Streaming WebSocket TTS for lower latency
-- Wire SummitForge agent responses to same helper

@@ -3,13 +3,20 @@
  * Part of the "build and test in one app" product clarity work.
  */
 
+export type GrokMode = 'live' | 'simulator' | 'key-missing'
+
 interface ModeBadgeProps {
-  hasApiKey: boolean
+  /** @deprecated prefer `mode` */
+  hasApiKey?: boolean
+  mode?: GrokMode
   compact?: boolean
 }
 
-export function ModeBadge({ hasApiKey, compact = false }: ModeBadgeProps) {
-  if (hasApiKey) {
+export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) {
+  const resolved: GrokMode =
+    mode ?? (hasApiKey ? 'live' : 'simulator')
+
+  if (resolved === 'live') {
     return (
       <span
         style={{
@@ -40,6 +47,37 @@ export function ModeBadge({ hasApiKey, compact = false }: ModeBadgeProps) {
     )
   }
 
+  if (resolved === 'key-missing') {
+    return (
+      <span
+        style={{
+          fontSize: compact ? 10 : 11,
+          background: 'rgba(255,80,80,.12)',
+          color: '#f66',
+          border: '1px solid rgba(255,80,80,.28)',
+          borderRadius: 6,
+          padding: compact ? '2px 7px' : '3px 9px',
+          fontWeight: 700,
+          letterSpacing: '0.02em',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+        }}
+        title="Key saved but rejected by xAI. Open Settings → paste a fresh key from console.x.ai."
+      >
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: '#f66',
+          }}
+        />
+        Key missing
+      </span>
+    )
+  }
+
   return (
     <span
       style={{
@@ -55,7 +93,7 @@ export function ModeBadge({ hasApiKey, compact = false }: ModeBadgeProps) {
         alignItems: 'center',
         gap: 5,
       }}
-      title="Add your xAI API key in Settings for real Grok. Simulator still demos the full flow."
+      title="Not talking to live Grok. Open Settings → paste a valid key from console.x.ai (Save & Verify must say Connected)."
     >
       <span
         style={{

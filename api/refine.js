@@ -1,5 +1,5 @@
 import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
-import { corsHeaders, rejectBlockedOrigin } from './security.js'
+import { corsHeaders, rejectBlockedOrigin, rejectRateLimited } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -13,6 +13,9 @@ export default async function handler(req) {
 
   const blocked = rejectBlockedOrigin(req)
   if (blocked) return blocked
+
+  const limited = rejectRateLimited(req)
+  if (limited) return limited
 
   const apiKey = getApiKey(req)
   if (!apiKey) {

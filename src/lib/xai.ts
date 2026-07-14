@@ -127,67 +127,78 @@ export async function generateWithLLM(
   }
 }
 
-// New: Multi-turn discussion chat like grok.com, using the full agent prompt + planning instructions
+export type DiscussResult = {
+  content: string
+  /** true only when real xAI Grok answered */
+  live: boolean
+  error?: string
+}
+
+function apiBase(path: string): string {
+  if (typeof window !== 'undefined') return path
+  // Node/Bun tests — hit local backend directly
+  const base = process.env.IDEASPEAK_API || 'http://localhost:3001'
+  return `${base.replace(/\/$/, '')}${path}`
+}
+
+// Collaborative plan chat — real Grok when API works; simulator only as fallback
 export async function discussWithGrok(
   messages: XaiMessage[],
   apiKey?: string,
   image?: string | null,
   personality: string = 'grok',
   voiceMode?: boolean
-): Promise<string> {
-  const key = apiKey || localStorage.getItem('ideaspeak_xai_key');
-  if (!key) {
-    // High-quality simulator — flavored by selected personality for fun customization
-    const lastUser = messages.filter(m => m.role === 'user').pop()?.content || '';
-    const historySummary = messages.length > 2 ? `We've been discussing this for a bit. ` : '';
-    const isVoice = !!voiceMode;
-    let prefix = `(simulator mode — add xAI key in Settings for the real Grok experience) `;
-    
-    if (personality === 'witty') {
-      prefix = `(simulator — Witty Comedian mode) `;
-      if (isVoice) return `${prefix}Haha, "${lastUser.slice(0,60)}". Bold. But seriously — what's the actual pain this fixes, and why will anyone care? What's the fastest way it could flop?`;
-      return `${prefix}${historySummary}Haha, "${lastUser.slice(0, 80)}${lastUser.length > 80 ? '...' : ''}" — bold move. But tell me, what's the real pain point here and why should anyone care? What's the dumbest way this could fail spectacularly? Let's sketch a plan before you embarrass yourself in public.`;
-    } else if (personality === 'mentor') {
-      prefix = `(simulator — Wise Mentor mode) `;
-      if (isVoice) return `${prefix}Interesting. "${lastUser.slice(0,60)}" — what's the deepest user need here? What assumption might bite us later?`;
-      return `${prefix}${historySummary}Interesting direction with "${lastUser.slice(0, 80)}${lastUser.length > 80 ? '...' : ''}". Let's slow down and think: What is the deepest user need this fulfills? What assumptions are we making that could be wrong? What does meaningful success look like?`;
-    } else if (personality === 'coach') {
-      prefix = `(simulator — Enthusiastic Coach mode) `;
-      if (isVoice) return `${prefix}Love the energy on "${lastUser.slice(0,60)}"! What's the one thing that would make users obsessed? What's blocking you right now? First step?`;
-      return `${prefix}${historySummary}YES! "${lastUser.slice(0, 80)}${lastUser.length > 80 ? '...' : ''}" — I love the energy! Now let's turn that spark into a plan. What's the ONE thing that would make users obsessed? What's stopping you right now? We've got this — first step?`;
-    } else if (personality === 'rebel') {
-      prefix = `(simulator — Rebel Hacker mode) `;
-      if (isVoice) return `${prefix}Fuck the boring path — "${lastUser.slice(0,60)}" has legs if we break the right rules. What's the contrarian angle? What should we destroy?`;
-      return `${prefix}${historySummary}Fuck the rules — "${lastUser.slice(0, 80)}${lastUser.length > 80 ? '...' : ''}" could be huge if we break shit the right way. What's the contrarian take here? What's the boring corporate way everyone does it that we should destroy? Let's build something that pisses off the right people.`;
-    }
-    
-    // Default Grok Classic
-    if (isVoice) {
-      return `${prefix}I like where you're going with "${lastUser.slice(0,80)}". What's the core problem this solves for the real user, and why does it matter? Biggest risk you see? What's your gut on the first user flow?`;
-    }
-    return `${prefix}${historySummary}I like where you're going with "${lastUser.slice(0, 100)}${lastUser.length > 100 ? '...' : ''}". 
+): Promise<DiscussResult> {
+  const key = (
+    apiKey ||
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('ideaspeak_xai_key') : '') ||
+    ''
+  ).trim()
 
-To vet this properly: What's the core problem this solves for the user, and why does it matter emotionally? What are the biggest risks or assumptions that could sink it? 
-
-Any constraints (time, budget, tech stack)? What would "success" look like in 3 months?
-
-Let's map out a simple plan together — MVP scope, key flows, and one or two wow moments. What's your first thought on the main user journey?`;
-  }
-
+  // Always hit the server first — production may have XAI_API_KEY with no client key
   try {
-    const res = await fetch('/api/discuss', {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (key) headers['X-AI-Key'] = key
+
+    const res = await fetch(apiBase('/api/discuss'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-AI-Key': key,
-      },
+      headers,
       body: JSON.stringify({ messages, image, personality, voiceMode }),
-    });
-    const data = await res.json();
-    return data.content || "The agent didn't return a response.";
-  } catch (e) {
-    console.error('Discuss call failed', e);
-    throw e;
+    })
+    const data = await res.json().catch(() => ({} as any))
+
+    if (!res.ok) {
+      const errMsg =
+        (typeof data?.error === 'string' && data.error) ||
+        data?.error?.message ||
+        `Discuss failed (${res.status})`
+      console.warn('Discuss API error:', errMsg)
+      return {
+        content: simulateDiscuss(messages, personality, !!voiceMode),
+        live: false,
+        error: errMsg,
+      }
+    }
+
+    const content = String(data?.content || '').trim()
+    if (content) {
+      return { content, live: true }
+    }
+
+    return {
+      content: simulateDiscuss(messages, personality, !!voiceMode),
+      live: false,
+      error: 'Empty response from Grok',
+    }
+  } catch (e: any) {
+    console.error('Discuss call failed:', e)
+    return {
+      content: simulateDiscuss(messages, personality, !!voiceMode),
+      live: false,
+      error: e?.message || 'Network error reaching Grok',
+    }
   }
 }
 
@@ -213,6 +224,65 @@ export async function generateImage(prompt: string, apiKey?: string): Promise<{ 
     console.error('Image gen failed', e);
     throw e;
   }
+}
+
+/** Plan-mode simulator: Grok energy, no restating, no corporate fluff */
+function simulateDiscuss(
+  messages: XaiMessage[],
+  personality: string,
+  voiceMode: boolean,
+): string {
+  const userTurns = messages.filter((m) => m.role === 'user')
+  const last = (userTurns[userTurns.length - 1]?.content || '').toLowerCase()
+  const n = userTurns.length
+  const lower = last
+
+  const isHabit = /habit|streak|daily|coach/.test(lower)
+  const isCrm = /crm|client|freelancer|lead/.test(lower)
+  const isVoiceApp = /voice|speak|transcript/.test(lower)
+  const wantsBuild = /\b(build it|let'?s build|ready|lock it|ship it|go ahead)\b/.test(lower)
+
+  if (wantsBuild && n >= 2) {
+    return voiceMode
+      ? "Cool. Plan's tight enough. Say build it and I'll drop a live preview on the right — one slice, not a science fair."
+      : "Alright — plan's tight enough. Hit Build and I'll generate a live preview from what we locked."
+  }
+
+  if (n <= 1) {
+    if (isHabit) {
+      return voiceMode
+        ? "Generic habit apps are where motivation goes to die. Make it did-you-ship-today or don't bother. Solo founder or tiny team?"
+        : "Generic habit apps are graveyards. I'd bet on did-you-ship-today energy, not water glasses. Solo founder or tiny team?"
+    }
+    if (isCrm) {
+      return voiceMode
+        ? "Most CRMs are homework. v1 should feel like texting someone smart. Freelancers or a sales pod first?"
+        : "Most CRMs are homework nobody does. v1: capture, status, next action — that's it. Freelancers or sales pod?"
+    }
+    if (isVoiceApp) {
+      return voiceMode
+        ? "Voice is the input, structure is the product. Speech becomes tasks, notes, or a roadmap — pick one for v1."
+        : "Voice is cheap; structure is the product. For v1, speech becomes tasks, notes, or a roadmap — which one?"
+    }
+    if (personality === 'rebel') {
+      return voiceMode
+        ? "Okay, there's blood in the water. Who's bleeding without this by tomorrow?"
+        : "There's blood in the water. Who's in pain without this tomorrow?"
+    }
+    return voiceMode
+      ? "Skip the pitch deck energy. Who's it for, and what do they actually do every day?"
+      : "Skip the pitch deck. Primary user — and the one daily action that makes this sticky?"
+  }
+
+  if (n === 2) {
+    return voiceMode
+      ? "I'd ship one hero screen, dark UI that doesn't scream AI-slop, core loop only. What's the screenshot moment?"
+      : "Default: one hero screen, dark premium UI, core loop only. Auth later. What's the screenshot moment?"
+  }
+
+  return voiceMode
+    ? "We've got user, loop, and a wow angle. Cut the rest. Say build it when you want the live preview."
+    : "We've got enough: user, loop, wow, ruthless cut. Say build it or hit Build for the live preview."
 }
 
 function simulateLocal(transcript: string, _history: any[]) {

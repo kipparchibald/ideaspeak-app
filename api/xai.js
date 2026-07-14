@@ -1,8 +1,9 @@
 /** Shared xAI client for Edge API routes */
 
 export const MODELS = {
-  chat: 'grok-4.3',
-  build: 'grok-build-0.1',
+  // Prefer fast chat models that accept max_tokens cleanly
+  chat: process.env.XAI_CHAT_MODEL || 'grok-3',
+  build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
 }
 
 function readHeaderKey(req) {
@@ -14,14 +15,21 @@ function readHeaderKey(req) {
   return typeof key === 'string' ? key.trim() : ''
 }
 
-/** Server env key only in production; client header allowed only for local dev fallback */
+/**
+ * Resolve API key:
+ * - Production: server XAI_API_KEY only (never trust browser keys)
+ * - Local/dev: prefer Settings key (X-AI-Key header), then .env.local
+ */
 export function getApiKey(req) {
-  const serverKey = process.env.XAI_API_KEY?.trim()
-  if (serverKey) return serverKey
+  const serverKey = process.env.XAI_API_KEY?.trim() || ''
+  const clientKey = readHeaderKey(req)
 
-  if (process.env.VERCEL_ENV === 'production') return ''
+  if (process.env.VERCEL_ENV === 'production') {
+    return serverKey
+  }
 
-  return readHeaderKey(req)
+  // Local: client Settings key first so a bad .env.local can't block a good key
+  return clientKey || serverKey
 }
 
 export function hasServerApiKey() {
@@ -43,19 +51,24 @@ export async function chatCompletion(apiKey, {
   temperature = 0.75,
   reasoningEffort = 'low',
 }) {
+  const body = {
+    model: MODELS.chat,
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  }
+  // Only attach reasoning_effort for models that support it
+  if (reasoningEffort && String(MODELS.chat).includes('grok-4')) {
+    body.reasoning_effort = reasoningEffort
+  }
+
   const res = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: MODELS.chat,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-      reasoning_effort: reasoningEffort,
-    }),
+    body: JSON.stringify(body),
   })
 
   const data = await res.json()

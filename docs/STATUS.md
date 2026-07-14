@@ -1,50 +1,59 @@
-# IdeaSpeak + SummitForge — Autonomous Build Status
+# IdeaSpeak — Build Status
 
-**Last updated:** July 13, 2026 ~10:40 AM MDT
+**Product:** Voice-first xAI app builder (speak idea → live preview → export)  
+**Repo:** `ideaspeak-app` only  
+**Live:** https://ideaspeak-app.vercel.app  
 
----
+**Not this product:** SummitForge RE OS is a separate real-estate app in its own repo (`SummitForge-RE-OS`). Do not mix code, status, or scope.
 
-## 🟢 Working Status
-
-| Project | Focus | Latest Commit Focus |
-|---------|-------|---------------------|
-| **IdeaSpeak** | Build → Live Preview loop | ModeBadge (Simulator vs Real Grok), docs, publish checklist |
-| **SummitForge** | Alerts + multi-tenant foundation | Matching engine, notifications, Recent Matches UI, tenant types |
+**Last updated:** July 14, 2026
 
 ---
 
-## IdeaSpeak — Current Score: **8.1 / 10**
+## Current Score: **8.2 / 10**
 
 ### Done recently
-- ModeBadge component (clear Simulator / Real Grok indicator)
-- BUILD_AND_TEST_LOOP.md (product north star)
-- PUBLISH_CHECKLIST updated
-- DEMO_NOTES.md
-- Strong README
+- Voice-first UI: large Tap-to-speak mic, Chat → Build → Preview flow
+- Preview | Code workspace tabs (preview-first)
+- ModeBadge (Simulator vs Real Grok)
+- API setup + Grok TTS settings
+- Ship panel (Supabase · Vercel · domain checklist)
+- Polish panel (Grok / Cursor / Claude / GPT handoff)
+- Pricing panel + local usage metering (`billing.ts`)
+- Vercel edge API (`api/*.js`) + Railway config for Bun server
+- BUILD_AND_TEST_LOOP.md, PUBLISH_CHECKLIST, DEMO_NOTES, **SHIP_SPRINT.md**
+- **Sprint 0.4:** `PUBLISH_CHECKLIST.md` synced with codebase reality
+- **Sprint 0.6:** GitHub Actions CI — `bun install` → `build` → `smoke:local` on push/PR to `main`
+- **`docs/ENV_MATRIX.md`** — Local / Vercel / Railway env documentation
 
-### Next (autonomous)
-1. Wire ModeBadge into main App header (replace old badge)
-2. Improve Settings modal key messaging
-3. Landing / hero clarity
-4. Full-screen test mode for live preview
+### Sprint execution (parallel agents, June 15 2026)
+| Sprint | Status |
+|--------|--------|
+| 0 Hygiene | ✅ TS clean build, CI workflow, ENV_MATRIX |
+| 1 Polish | ✅ Hero copy, ModeBadge, Sandpack split, export harden, Ship/Polish panels |
+| 2 Hosting | ✅ CORS, rate limits, env validation, API_SETUP |
+| 3 Sandbox | ✅ E2B manager + UI toggle (needs `E2B_API_KEY` on Railway) |
+| 4 Auth | ✅ Supabase schema + AccountPanel + cloud sync stubs |
+| 5 Payments | ✅ Stripe checkout + webhooks (needs test/live keys) |
+| 6 Launch | ⏳ Analytics, legal, demo video |
+
+### Next (Sprint 6 + hardening)
+1. Wire `BuildProgressOverlay` cancel/retry in App.tsx
+2. Deploy Railway with `XAI_API_KEY` + `E2B_API_KEY` + `STRIPE_*`
+3. Supabase project + run `supabase/schema.sql`
+4. Stripe test-mode E2E → production keys
+5. Launch video + analytics (Plausible/PostHog)
+5. Sprint 0.5: branch protection on `main` (repo settings)
 
 ---
 
-## SummitForge — Current Score: **4.8 / 10**
+## Boundaries
 
-### Done recently
-- Full README
-- Expanded package.json
-- Matching engine connected to import
-- Notifications foundation (SMS-first)
-- Enhanced Alerts page with Recent Matches tab
-- Multi-tenant types (`types/tenant.ts`)
+| | IdeaSpeak | SummitForge |
+|--|-----------|-------------|
+| Purpose | Build *any* app by voice with Grok | RE operating system (land, deals, brokerage) |
+| Repo | `ideaspeak-app` | `SummitForge-RE-OS` |
+| Stack | Vite + React + Sandpack + xAI proxy | Next.js 15 RE dashboard |
+| Work here? | Yes | No — open that repo |
 
-### Next (autonomous)
-1. Wire real matches into the Recent Matches feed
-2. Basic branding theme variables
-3. UI consistency pass on Analytics
-
----
-
-*This file is updated as work continues. Pull both repos to stay current.*
+When an agent or human is in this workspace, only change IdeaSpeak.

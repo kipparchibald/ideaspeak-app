@@ -5,11 +5,12 @@
 ## How to Demo (30-second pitch)
 
 1. Open the site (or install as PWA on phone).
-2. Click the big mic and speak a real idea (e.g. "Build me a simple client portal for real estate agents that lets sellers upload documents by voice").
-3. Watch the Voice Refiner turn the messy speech into a clean brief.
-4. Hit Build → see multi-file React project + live Sandpack preview appear.
-5. Speak a refinement ("Make the colors more premium and add a timeline view").
-6. Export ZIP or push to GitHub — full Next.js 15 project ready to ship.
+2. Tap the big mic and speak a real idea (e.g. "A habit tracker that feels like texting a coach").
+3. Chat/refine, then Build → multi-file project + live Sandpack preview.
+4. Speak a refinement ("Make the colors more premium and add a timeline view").
+5. Export ZIP — runnable project ready to ship.
+
+IdeaSpeak builds *any* product idea. It is not SummitForge (that is a separate RE OS app).
 
 ## Simulator vs Real Grok
 
@@ -22,7 +23,7 @@ The UI should always make it obvious which mode is active.
 
 ## Recommended Demo Ideas
 
-- Voice-first real estate client portal
+- Habit tracker that feels like texting a coach
 - Founder roadmap + task extractor
 - Simple marketplace for local services
 - Personal CRM with voice notes
