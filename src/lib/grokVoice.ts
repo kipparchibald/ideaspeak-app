@@ -86,6 +86,7 @@ export class GrokVoiceAgent {
   private userBuf = ''
   private nextPlayTime = 0
   private conversationSeeded = false
+  private pendingBoot: (() => Promise<void>) | null = null
 
   constructor(opts: GrokVoiceOptions = {}) {
     this.opts = {
@@ -104,35 +105,63 @@ export class GrokVoiceAgent {
     return this.state
   }
 
+  private buildSessionConfig() {
+    return {
+      voice: this.opts.voice || 'eve',
+      instructions: this.opts.instructions || IDEASPEAK_VOICE_INSTRUCTIONS,
+      reasoning: { effort: 'none' as const },
+      turn_detection: {
+        type: 'server_vad' as const,
+        threshold: 0.5,
+        prefix_padding_ms: 333,
+        silence_duration_ms: 600,
+      },
+      audio: {
+        input: { format: { type: 'audio/pcm' as const, rate: 24000 } },
+        output: { format: { type: 'audio/pcm' as const, rate: 24000 } },
+      },
+    }
+  }
+
   private async getEphemeralToken(): Promise<string> {
     const res = await fetch('/api/voice/token', { method: 'POST' })
-    const data = await res.json().catch(() => ({} as any))
+    const data = await res.json().catch(() => ({} as Record<string, unknown>))
     if (!res.ok) {
-      throw new Error(
-        data.error ||
-          data.message ||
-          `Voice token failed (${res.status}). Is XAI_API_KEY set on the server?`,
-      )
+      const err =
+        (typeof data.error === 'string' && data.error) ||
+        (typeof data.message === 'string' && data.message) ||
+        `Voice token failed (${res.status}). Is XAI_API_KEY set on the server?`
+      throw new Error(err)
     }
-    const token =
-      data.client_secret?.value ||
-      data.value ||
-      data.token ||
-      data.client_secret
-    if (!token || typeof token !== 'string') {
+    const raw =
+      (data.client_secret as { value?: string } | undefined)?.value ||
+      (typeof data.value === 'string' ? data.value : '') ||
+      (typeof data.token === 'string' ? data.token : '') ||
+      (typeof data.client_secret === 'string' ? data.client_secret : '')
+    if (!raw) {
       throw new Error('Voice token response missing client_secret')
     }
-    return token
+    return raw.startsWith('xai-client-secret.') ? raw.slice('xai-client-secret.'.length) : raw
   }
 
   async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) return
     this.setState('connecting')
+    this.conversationSeeded = false
+    this.pendingBoot = null
 
     try {
       const token = await this.getEphemeralToken()
 
       await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const finish = (fn: () => void) => {
+          if (settled) return
+          settled = true
+          window.clearTimeout(timeout)
+          fn()
+        }
+
         const ws = new WebSocket(
           'wss://api.x.ai/v1/realtime?model=grok-voice-latest',
           [`xai-client-secret.${token}`],
@@ -141,38 +170,21 @@ export class GrokVoiceAgent {
         ws.binaryType = 'arraybuffer'
 
         const timeout = window.setTimeout(() => {
-          reject(new Error('Grok Voice connection timed out'))
-        }, 15000)
+          finish(() => reject(new Error('Grok Voice connection timed out')))
+        }, 20_000)
+
+        this.pendingBoot = async () => {
+          await this.startMicrophone(this.opts.greetingInstructions)
+          finish(resolve)
+        }
 
         ws.onopen = () => {
           ws.send(
             JSON.stringify({
               type: 'session.update',
-              session: {
-                voice: this.opts.voice || 'eve',
-                instructions: this.opts.instructions || IDEASPEAK_VOICE_INSTRUCTIONS,
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.5,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 600,
-                },
-                input_audio_format: 'pcm16',
-                output_audio_format: 'pcm16',
-                input_audio_transcription: { model: 'whisper-1' },
-                tools: [{ type: 'web_search' }, { type: 'x_search' }],
-              },
+              session: this.buildSessionConfig(),
             }),
           )
-          void this.startMicrophone(this.opts.greetingInstructions)
-            .then(() => {
-              window.clearTimeout(timeout)
-              resolve()
-            })
-            .catch((err) => {
-              window.clearTimeout(timeout)
-              reject(err)
-            })
         }
 
         ws.onmessage = (e) => {
@@ -184,20 +196,34 @@ export class GrokVoiceAgent {
         }
 
         ws.onerror = () => {
-          window.clearTimeout(timeout)
-          this.opts.onError?.('WebSocket error talking to Grok Voice')
-          this.setState('error')
-          reject(new Error('WebSocket error'))
+          finish(() => {
+            this.opts.onError?.('WebSocket error talking to Grok Voice')
+            this.setState('error')
+            reject(new Error('WebSocket error'))
+          })
         }
 
-        ws.onclose = () => {
+        ws.onclose = (ev) => {
           this.cleanupMedia()
-          if (this.state !== 'idle') this.setState('idle')
+          this.pendingBoot = null
+          if (!settled) {
+            finish(() =>
+              reject(
+                new Error(
+                  ev.reason?.trim() || `Grok Voice disconnected (code ${ev.code})`,
+                ),
+              ),
+            )
+            return
+          }
+          if (this.state !== 'idle' && this.state !== 'error') this.setState('idle')
         }
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
+      this.pendingBoot = null
       this.setState('error')
-      this.opts.onError?.(err.message || 'Failed to connect to Grok Voice')
+      const msg = err instanceof Error ? err.message : 'Failed to connect to Grok Voice'
+      this.opts.onError?.(msg)
       throw err
     }
   }
@@ -205,12 +231,24 @@ export class GrokVoiceAgent {
   private handleEvent(event: any) {
     switch (event.type) {
       case 'session.created':
+        break
+
       case 'session.updated':
         if (!this.conversationSeeded) {
           this.seedConversation(this.opts.conversationSeed)
           this.conversationSeeded = true
         }
-        if (this.state === 'connecting') this.setState('listening')
+        if (this.pendingBoot) {
+          const boot = this.pendingBoot
+          this.pendingBoot = null
+          void boot().catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Microphone setup failed'
+            this.opts.onError?.(msg)
+            this.setState('error')
+          })
+        } else if (this.state === 'connecting') {
+          this.setState('listening')
+        }
         break
 
       case 'input_audio_buffer.speech_started':
@@ -290,10 +328,17 @@ export class GrokVoiceAgent {
         })
         break
 
-      case 'error':
-        this.opts.onError?.(event.error?.message || event.message || 'Grok Voice error')
+      case 'error': {
+        const msg =
+          event.error?.message ||
+          event.message ||
+          (typeof event.error === 'string' ? event.error : '') ||
+          'Grok Voice error'
+        this.pendingBoot = null
+        this.opts.onError?.(msg)
         this.setState('error')
         break
+      }
     }
   }
 
@@ -329,7 +374,9 @@ export class GrokVoiceAgent {
           item: {
             type: 'message',
             role,
-            content: [{ type: role === 'user' ? 'input_text' : 'text', text: turn.content }],
+            content: [
+              { type: role === 'user' ? 'input_text' : 'output_text', text: turn.content },
+            ],
           },
         }),
       )
@@ -383,7 +430,6 @@ export class GrokVoiceAgent {
         JSON.stringify({
           type: 'response.create',
           response: {
-            modalities: ['audio', 'text'],
             instructions:
               greetingInstructions ||
               this.opts.greetingInstructions ||
@@ -482,10 +528,7 @@ export class GrokVoiceAgent {
     this.ws.send(
       JSON.stringify({
         type: 'response.create',
-        response: {
-          modalities: ['audio', 'text'],
-          instructions,
-        },
+        response: { instructions },
       }),
     )
   }
@@ -525,6 +568,8 @@ export class GrokVoiceAgent {
   }
 
   disconnect() {
+    this.pendingBoot = null
+    this.conversationSeeded = false
     this.cleanupMedia()
     try {
       this.ws?.close()

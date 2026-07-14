@@ -3,6 +3,8 @@
 const PRODUCTION_ORIGINS = new Set([
   'https://ideaspeak-app.vercel.app',
   'https://ideaspeak-app-voxli.vercel.app',
+  'https://ideaspeak.dev',
+  'https://www.ideaspeak.dev',
 ])
 
 const DEV_ORIGINS = new Set([
