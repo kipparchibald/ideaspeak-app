@@ -499,7 +499,31 @@ Rules:
       return Response.json({ received: true }, { headers })
     }
 
+    if (url.pathname === '/api/usage') {
+      const { default: usageHandler } = await import('../api/usage.js')
+      return usageHandler(req)
+    }
+
     // ── Ship orchestrator (GitHub → Vercel → env → live) ───────────────────
+    if (url.pathname === '/api/ship' && req.method === 'GET') {
+      const jobId = url.searchParams.get('jobId')?.trim() || ''
+      if (!jobId) {
+        return Response.json({ error: 'jobId query param required' }, { status: 400, headers })
+      }
+      try {
+        const { getShipJob, serializeShipJob } = await import('./ship-orchestrator.js')
+        const job = await getShipJob(jobId)
+        if (job) {
+          return Response.json({ job: serializeShipJob(job) }, { headers })
+        }
+        const { stubJobProgress } = await import('./ship-stub.js')
+        const stub = stubJobProgress(jobId)
+        return Response.json({ job: stub.job, stub: stub.stub, message: stub.message }, { headers })
+      } catch (e: any) {
+        return Response.json({ error: e?.message || 'Status failed' }, { status: 500, headers })
+      }
+    }
+
     if (url.pathname === '/api/ship' && req.method === 'POST') {
       try {
         const workerSecret = process.env.SHIP_WORKER_SECRET?.trim()
@@ -517,10 +541,16 @@ Rules:
         const appName = typeof body.appName === 'string' ? body.appName.trim() : ''
         const appSlug = typeof body.appSlug === 'string' ? body.appSlug.trim() : ''
         const jobIdFromBody = typeof body.jobId === 'string' ? body.jobId.trim() : undefined
-        const scaffoldFiles =
+        const { MIN_PROBE_SCAFFOLD } = await import('./ship-stub.js')
+        let scaffoldFiles: Record<string, string> | null =
           body.scaffoldFiles && typeof body.scaffoldFiles === 'object'
             ? (body.scaffoldFiles as Record<string, string>)
             : null
+        if (!scaffoldFiles || Object.keys(scaffoldFiles).length === 0) {
+          if (body.scaffoldFileCount != null) {
+            scaffoldFiles = { ...MIN_PROBE_SCAFFOLD }
+          }
+        }
 
         if (!appName) {
           return Response.json({ error: 'appName required' }, { status: 400, headers })
@@ -529,7 +559,10 @@ Rules:
           return Response.json({ error: 'appSlug required' }, { status: 400, headers })
         }
         if (!scaffoldFiles || Object.keys(scaffoldFiles).length === 0) {
-          return Response.json({ error: 'scaffoldFiles required (non-empty)' }, { status: 400, headers })
+          return Response.json(
+            { error: 'scaffoldFiles or scaffoldFileCount required' },
+            { status: 400, headers },
+          )
         }
 
         const { createShipJob, getShipJob, runShipJob, serializeShipJob } = await import(
@@ -600,7 +633,7 @@ Rules:
     }
 
     return new Response(
-      'IdeaSpeak API — /health /api/voice/token /api/xai /api/refine /api/build /api/discuss /api/ship /api/image /api/sandbox/* /api/stripe/checkout /api/stripe/webhook',
+      'IdeaSpeak API — /health /api/voice/token /api/xai /api/refine /api/build /api/discuss /api/usage /api/ship /api/image /api/sandbox/* /api/stripe/checkout /api/stripe/webhook',
       { headers },
     )
   },

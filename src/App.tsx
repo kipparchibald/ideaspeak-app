@@ -1136,6 +1136,8 @@ export default function App() {
       progress.logBuildRequest()
       progress.startTicker()
 
+      let upgradeDone: Promise<void> | null = null
+
       try {
         progress.note('Parsing collaborative plan from voice session…', 'Voice Refiner')
         progress.note(`Brief: ${String(brief.vision || idea).slice(0, 96)}…`, 'Architect')
@@ -1182,7 +1184,7 @@ export default function App() {
         })
 
         if (key) {
-          void (async () => {
+          upgradeDone = (async () => {
             setIsUpgrading(true)
             progress.note('Optional Grok upgrade — richer components…', 'Builder')
             try {
@@ -1213,6 +1215,17 @@ export default function App() {
                   source = 'grok'
                   setPreviewRevision((n) => n + 1)
                   progress.note('Grok upgrade applied to preview', 'Builder')
+                  persistSessionSnapshot({
+                    workspaceId: activeWorkspaceId,
+                    messages: history,
+                    mode: 'build',
+                    planReady: true,
+                    hasBuilt: true,
+                    generatedFiles: candidate,
+                    lastBuiltName: name,
+                    lastBuildPlan: plan,
+                    personality,
+                  })
                   toast.success('Preview upgraded', { description: `${name} · Grok build` })
                 } else {
                   progress.note('Grok upgrade skipped — keeping working local preview', 'Builder')
@@ -1248,9 +1261,16 @@ export default function App() {
         return { plan, name: fallback.name, source: 'local' as const }
       } finally {
         setIsBuilding(false)
-        setIsUpgrading(false)
-        endBuildProgress()
-        window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
+        const finishProgress = () => {
+          endBuildProgress()
+          window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
+        }
+        if (upgradeDone) {
+          void upgradeDone.finally(finishProgress)
+        } else {
+          setIsUpgrading(false)
+          finishProgress()
+        }
       }
     },
     [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId],
@@ -1260,14 +1280,6 @@ export default function App() {
     async (text?: string, modeOverride?: Mode, opts?: { force?: boolean }) => {
       const content = (text || input).trim()
       if (!content) return
-      if (isLoading && !opts?.force) {
-        toast.message('Still working on the last turn…')
-        return
-      }
-
-      const fromVoice = voiceTurnRef.current
-      voiceTurnRef.current = false
-
       // Default: stay in plan/discuss. Only build on explicit green-light or Build mode send.
       let activeMode: Mode = modeOverride ?? mode
       if (modeOverride) {
@@ -1281,6 +1293,15 @@ export default function App() {
         // User is in Build tab but still ideating — keep collaborating
         activeMode = 'discuss'
       }
+
+      const isBuildIntent = activeMode === 'build' || wantsBuild(content)
+      if (isLoading && !opts?.force && !isBuildIntent) {
+        toast.message('Still working on the last turn…')
+        return
+      }
+
+      const fromVoice = voiceTurnRef.current
+      voiceTurnRef.current = false
 
       setInput('')
       setVoiceInterim('')
@@ -1296,10 +1317,21 @@ export default function App() {
         stopVoice()
       }
 
-      const userMsg: ChatMessage = { role: 'user', content, timestamp: Date.now() }
-      const nextHistory = [...messagesRef.current, userMsg]
-      messagesRef.current = nextHistory
-      setMessages(nextHistory)
+      const last = messagesRef.current[messagesRef.current.length - 1]
+      const skipDupBuild =
+        isBuildIntent &&
+        last?.role === 'user' &&
+        wantsBuild(last.content) &&
+        wantsBuild(content)
+      let nextHistory: ChatMessage[]
+      if (skipDupBuild) {
+        nextHistory = messagesRef.current
+      } else {
+        const userMsg: ChatMessage = { role: 'user', content, timestamp: Date.now() }
+        nextHistory = [...messagesRef.current, userMsg]
+        messagesRef.current = nextHistory
+        setMessages(nextHistory)
+      }
       setIsLoading(true)
 
       try {
