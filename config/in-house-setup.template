@@ -1,0 +1,30 @@
+# IdeaSpeak in-house platform — fill in, then run: bun run setup:in-house --apply
+# Never commit this file with real values. Copy to config/in-house-setup.local (gitignored).
+
+# ── Supabase (https://supabase.com/dashboard → your project → Settings → API) ──
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_KEY=eyJ...service_role...
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...anon...
+
+# ── Railway (after deploy — copy public URL from Railway dashboard) ──
+RAILWAY_PUBLIC_URL=https://your-service.up.railway.app
+
+# ── Ship worker auth (generate: openssl rand -hex 32) ──
+SHIP_WORKER_SECRET=
+
+# ── GitHub (https://github.com/settings/tokens → Fine-grained or classic repo scope) ──
+# Classic: repo scope. Fine-grained: Contents read/write on ideaspeak-apps org repos.
+GITHUB_TOKEN=github_pat_...
+
+# ── Vercel deploy API (https://vercel.com/account/tokens) ──
+VERCEL_TOKEN=
+# Optional — team slug from Vercel → Settings → General (e.g. voxli)
+VERCEL_TEAM_ID=team_ZEZVchkfVnLrlfIFcBD32tFl
+
+# ── Optional (add when ready) ──
+# E2B_API_KEY=
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# STRIPE_PRO_PRICE_ID=
+# STRIPE_TEAM_PRICE_ID=

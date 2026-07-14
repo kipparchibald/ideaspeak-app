@@ -25,3 +25,4 @@ dist-ssr
 .vercel
 .smoke-artifacts
 .env*
+config/in-house-setup.local
