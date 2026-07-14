@@ -163,6 +163,18 @@ export function normalizeShipJobRecord(raw: unknown): ShipJobRecord {
         : typeof row.updated_at === 'string'
           ? row.updated_at
           : new Date().toISOString(),
+    stub:
+      row.stub === true
+        ? true
+        : row.stub === false
+          ? false
+          : undefined,
+    platformMessage:
+      typeof row.platformMessage === 'string'
+        ? row.platformMessage
+        : typeof row.message === 'string'
+          ? row.message
+          : undefined,
   }
 }
 
@@ -171,10 +183,25 @@ function extractJobPayload(data: unknown): ShipJobRecord {
     throw new ShipJobApiError('Invalid ship job response', 500)
   }
   const envelope = data as Record<string, unknown>
-  if (envelope.job && typeof envelope.job === 'object') {
-    return normalizeShipJobRecord(envelope.job)
+  const meta = {
+    stub: envelope.stub === true ? true : undefined,
+    platformMessage:
+      typeof envelope.message === 'string'
+        ? envelope.message
+        : typeof envelope.platformMessage === 'string'
+          ? envelope.platformMessage
+          : undefined,
   }
-  return normalizeShipJobRecord(envelope)
+  if (envelope.job && typeof envelope.job === 'object') {
+    const job = normalizeShipJobRecord(envelope.job)
+    return {
+      ...job,
+      stub: job.stub ?? meta.stub,
+      platformMessage: job.platformMessage ?? meta.platformMessage,
+    }
+  }
+  const job = normalizeShipJobRecord(envelope)
+  return { ...job, ...meta }
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -277,6 +304,14 @@ export async function pollShipJob(
 
     const job = await fetchShipJob(jobId)
     emitNewEvents(job.events, seen, opts?.onEvent)
+
+    if (job.stub) {
+      const stubElapsed = Date.now() - started
+      const stubCap = opts?.stubTimeoutMs ?? 18_000
+      if (stubElapsed >= stubCap) {
+        return { ...job, status: 'queued' }
+      }
+    }
 
     if (TERMINAL_SHIP_JOB_STATUSES.has(job.status)) {
       return job

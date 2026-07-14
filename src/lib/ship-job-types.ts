@@ -36,6 +36,9 @@ export interface ShipJobRecord {
   error?: string | null
   createdAt: string
   updatedAt: string
+  /** Edge stub mode — worker/Supabase not fully wired */
+  stub?: boolean
+  platformMessage?: string | null
 }
 
 export interface StartShipJobOpts {
@@ -52,6 +55,8 @@ export interface PollShipJobOpts {
   onEvent?: (event: ShipJobEvent) => void
   intervalMs?: number
   timeoutMs?: number
+  /** Stop early in stub mode after showing provisioning steps */
+  stubTimeoutMs?: number
   signal?: AbortSignal
 }
 

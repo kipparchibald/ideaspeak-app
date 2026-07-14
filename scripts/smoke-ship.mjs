@@ -22,6 +22,15 @@ function extractJob(data) {
   return null
 }
 
+function isStubEnvelope(data) {
+  if (!data || typeof data !== 'object') return false
+  if (data.stub === true) return true
+  const job = extractJob(data)
+  return job?.stub === true
+}
+
+const LAUNCH_STEPS = new Set(['github', 'vercel', 'env', 'domain', 'done'])
+
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
 }
@@ -86,7 +95,38 @@ console.log(`Ship smoke → ${API}/api/ship`)
 const posted = await postShipJob()
 console.log(`✓ POST queued job ${posted.jobId} (${posted.status})`)
 
-const polled = await pollShipJob(posted.jobId)
+let polled
+let pollEnvelope
+for (let attempt = 0; attempt < 8; attempt++) {
+  const params = new URLSearchParams({ jobId: posted.jobId })
+  const res = await fetch(`${API}/api/ship?${params.toString()}`, {
+    signal: AbortSignal.timeout(30_000),
+  })
+  pollEnvelope = await res.json()
+  polled = extractJob(pollEnvelope)
+  assert(polled, 'GET response missing job envelope')
+  if (Array.isArray(polled.events) && polled.events.length >= 2) break
+  await new Promise((r) => setTimeout(r, 2000))
+}
+
 console.log(`✓ GET polled job ${polled.id || polled.jobId} (${polled.status})`)
+
+const stubMode = isStubEnvelope(pollEnvelope)
+if (stubMode) {
+  assert(
+    !JSON.stringify(pollEnvelope).includes('SHIP_WORKER'),
+    'stub response leaked internal env var names',
+  )
+  const steps = (polled.events || []).map((e) => e.step).filter(Boolean)
+  assert(
+    steps.some((s) => LAUNCH_STEPS.has(s)),
+    `stub events should use launch steps, got: ${steps.join(',')}`,
+  )
+  console.log(`✓ stub mode (${steps.length} timeline events)`)
+} else if (process.env.EXPECT_STUB === '1') {
+  assert(false, 'expected stub envelope (EXPECT_STUB=1) but worker appears live')
+} else {
+  console.log('⊘ live worker mode — stub assertions skipped')
+}
 
 console.log('✓ smoke:ship passed')

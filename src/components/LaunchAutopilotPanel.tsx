@@ -50,6 +50,11 @@ import {
 import { speak } from '../lib/tts'
 import { IN_HOUSE_PLATFORM, PLATFORM_COPY } from '../lib/platform'
 import { fabricLiveUrl } from '../lib/fabric-tenant'
+import {
+  fetchPlatformReadiness,
+  provisioningLaunchCopy,
+  type PlatformReadiness,
+} from '../lib/ship-platform-status'
 
 const STEP_ICONS: Record<LaunchStep, typeof FolderGit2> = {
   [LaunchStep.github]: FolderGit2,
@@ -110,6 +115,7 @@ export function LaunchAutopilotPanel({
   const [events, setEvents] = useState<LaunchTimelineEvent[]>([])
   const [deployChangelog, setDeployChangelog] = useState<string | null>(null)
   const [liveUrl, setLiveUrl] = useState(() => loadAutopilotState()?.liveUrl || '')
+  const [platformReadiness, setPlatformReadiness] = useState<PlatformReadiness | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -119,13 +125,29 @@ export function LaunchAutopilotPanel({
       loaded.appName = defaultAppName
       loaded.appSlug = slugify(defaultAppName)
     }
+    const saved = loadAutopilotState()
+    const targetUrl = fabricLiveUrl(loaded.appSlug)
+    if (IN_HOUSE_PLATFORM && !saved?.liveUrl) {
+      loaded.vercelProjectUrl = targetUrl
+      saveShipPrefs(loaded)
+    }
     setPrefs(loaded)
     setGithubToken(loadGithubToken())
-    const saved = loadAutopilotState()
-    if (saved?.liveUrl) setLiveUrl(saved.liveUrl)
+    if (IN_HOUSE_PLATFORM) {
+      setLiveUrl(saved?.liveUrl || targetUrl)
+    } else if (saved?.liveUrl) {
+      setLiveUrl(saved.liveUrl)
+    }
     if (saved?.repoUrl && !loaded.githubRepoUrl) {
       loaded.githubRepoUrl = saved.repoUrl
       setPrefs(loaded)
+    }
+
+    if (IN_HOUSE_PLATFORM) {
+      setPlatformReadiness(null)
+      void fetchPlatformReadiness(loaded.appSlug)
+        .then(setPlatformReadiness)
+        .catch(() => null)
     }
   }, [open, defaultAppName])
 
@@ -263,31 +285,46 @@ export function LaunchAutopilotPanel({
 
           for (const ev of job.events) pushTimelineEvent(ev)
 
+          const isStubJob = job.stub === true
           const final = await pollShipJob(job.id, {
             signal: ac.signal,
             onEvent: pushTimelineEvent,
+            stubTimeoutMs: isStubJob ? 18_000 : undefined,
           })
+
+          const stubMode = final.stub === true || isStubJob
 
           if (final.repoUrl) {
             update({ githubRepoUrl: final.repoUrl })
             saveAutopilotState({ repoUrl: final.repoUrl })
           }
+
+          const targetUrl = fabricLiveUrl(prefs.appSlug)
           if (final.liveUrl) {
             handleLiveUrl(final.liveUrl)
+          } else if (stubMode && IN_HOUSE_PLATFORM) {
+            handleLiveUrl(targetUrl)
           }
 
           setExpanded(LaunchStep.done)
 
-          const changelog = formatShipChangelog(final.events)
-          setDeployChangelog(getLastDeployChange(final.events) || changelog)
+          if (stubMode) {
+            const copy = provisioningLaunchCopy(prefs.appSlug)
+            setDeployChangelog(copy.changelog)
+            toast.message(copy.toastTitle, { description: copy.toastDetail })
+            void speak(copy.changelog, { provider: 'auto' }).catch(() => null)
+          } else {
+            const changelog = formatShipChangelog(final.events)
+            setDeployChangelog(getLastDeployChange(final.events) || changelog)
 
-          if (final.status === 'success') {
-            toast.success('Server Autopilot finished', {
-              description: changelog || final.liveUrl || 'Your app is deploying on the server',
-            })
-            void speak(changelog, { provider: 'auto' }).catch(() => null)
-          } else if (final.error) {
-            toast.error(final.error)
+            if (final.status === 'success') {
+              toast.success('Server Autopilot finished', {
+                description: changelog || final.liveUrl || 'Your app is deploying on the server',
+              })
+              void speak(changelog, { provider: 'auto' }).catch(() => null)
+            } else if (final.error) {
+              toast.error(final.error)
+            }
           }
           return
         } catch (serverErr) {
@@ -400,6 +437,23 @@ export function LaunchAutopilotPanel({
                   />
                 </label>
               </div>
+
+              {IN_HOUSE_PLATFORM && platformReadiness && platformReadiness.tier !== 'live' && (
+                <div
+                  className={`mt-3 rounded-xl border px-3 py-2.5 ${
+                    platformReadiness.tier === 'offline'
+                      ? 'border-[#fa0]/25 bg-[#fa0]/08'
+                      : 'border-[#7dd3fc]/25 bg-[#7dd3fc]/08'
+                  }`}
+                >
+                  <p className="text-[12px] font-semibold text-[#e8e8f0]">
+                    {platformReadiness.headline}
+                  </p>
+                  <p className="text-[11px] text-[#888] mt-0.5 leading-relaxed">
+                    {platformReadiness.detail}
+                  </p>
+                </div>
+              )}
 
               {IN_HOUSE_PLATFORM ? (
                 <p className="mt-3 text-[11px] text-[#7dd3fc]/90">

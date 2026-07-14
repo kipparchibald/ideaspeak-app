@@ -276,6 +276,43 @@ await step('Unit: discuss simulator fallback (mocked network)', async () => {
   }
 })
 
+await step('POST /api/ship queue + stub poll', async () => {
+  const slug = `smoke-e2e-${Date.now()}`
+  const origin = API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app'
+  const postRes = await fetch(`${API}/api/ship`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin },
+    body: JSON.stringify({
+      appName: 'Smoke E2E Ship',
+      appSlug: slug,
+      scaffoldFileCount: 1,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const posted = await postRes.json()
+  if (!postRes.ok) throw new Error(posted.error || `POST HTTP ${postRes.status}`)
+  const jobId = posted.job?.id
+  if (!jobId) throw new Error('POST missing job.id')
+
+  await sleep(3500)
+  const pollRes = await fetch(`${API}/api/ship?jobId=${encodeURIComponent(jobId)}`, {
+    headers: { Origin: origin },
+    signal: AbortSignal.timeout(30_000),
+  })
+  const polled = await pollRes.json()
+  if (!pollRes.ok) throw new Error(polled.error || `GET HTTP ${pollRes.status}`)
+  const job = polled.job
+  if (!job?.status) throw new Error('poll missing job.status')
+
+  const isStub = polled.stub === true || job.stub === true
+  const eventCount = Array.isArray(job.events) ? job.events.length : 0
+  if (isStub && eventCount < 1) throw new Error('stub poll missing timeline events')
+  if (isStub && JSON.stringify(polled).includes('SHIP_WORKER')) {
+    throw new Error('stub leaked internal worker env names')
+  }
+  return `status=${job.status} stub=${isStub} events=${eventCount}`
+})
+
 await step('Unit: production ship scaffold', async () => {
   const { buildProductionScaffold } = await import('../src/lib/ship.ts')
   const files = buildProductionScaffold({

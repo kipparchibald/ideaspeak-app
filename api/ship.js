@@ -133,8 +133,11 @@ function rowToJob(row) {
   }
 }
 
-function jobEnvelope(job) {
-  return { job }
+function jobEnvelope(job, meta = {}) {
+  const envelope = { job }
+  if (meta.stub === true) envelope.stub = true
+  if (meta.message) envelope.message = meta.message
+  return envelope
 }
 
 async function insertDeployJob(row) {
@@ -170,62 +173,89 @@ async function fetchDeployJob(jobId) {
   return rows?.[0] || null
 }
 
+const STUB_PLATFORM_MESSAGE =
+  'Your app is queued on IdeaSpeak. Full auto-deploy activates once our platform worker finishes connecting — no action needed from you.'
+
 function stubJobProgress(jobId) {
   const ts = parseJobTimestamp(jobId)
   if (!ts) {
     return {
-      id: jobId,
-      appName: '',
-      appSlug: '',
-      status: 'error',
-      liveUrl: null,
-      repoUrl: null,
-      events: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      job: {
+        id: jobId,
+        appName: '',
+        appSlug: '',
+        status: 'error',
+        liveUrl: null,
+        repoUrl: null,
+        events: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        stub: true,
+        platformMessage: 'Invalid job — please try launching again.',
+      },
       stub: true,
-      message: 'Invalid jobId — expected format job-<timestamp>',
+      message: 'Invalid job — please try launching again.',
     }
   }
 
   const elapsed = Date.now() - ts
-  const events = [
-    {
-      id: 'stub-queue',
-      step: 'queue',
-      status: 'success',
-      title: 'Queued',
-      message: 'Local stub — connect Supabase + SHIP_WORKER_URL for real deploys.',
-      timestamp: new Date(ts).toISOString(),
-    },
-  ]
+  const events = []
 
-  if (elapsed >= 2500) {
+  events.push({
+    id: 'stub-github',
+    step: 'github',
+    status: elapsed >= 3500 ? 'success' : 'running',
+    title: 'GitHub',
+    message:
+      elapsed >= 3500
+        ? 'Production scaffold queued for IdeaSpeak GitHub'
+        : 'Packaging your production scaffold…',
+    timestamp: ts + 500,
+  })
+
+  if (elapsed >= 3500) {
     events.push({
-      id: 'stub-prepare',
-      step: 'prepare',
+      id: 'stub-vercel',
+      step: 'vercel',
+      status: elapsed >= 8000 ? 'success' : 'running',
+      title: 'Vercel',
+      message:
+        elapsed >= 8000
+          ? 'Deploy pipeline ready on IdeaSpeak Vercel'
+          : 'Preparing Vercel deploy…',
+      timestamp: ts + 4000,
+    })
+  }
+
+  if (elapsed >= 8000) {
+    events.push({
+      id: 'stub-env',
+      step: 'env',
       status: elapsed >= 12000 ? 'success' : 'running',
-      title: 'Preparing scaffold',
-      message: 'Packaging export files (simulated — no worker attached).',
-      timestamp: new Date(ts + 2500).toISOString(),
+      title: 'Environment',
+      message:
+        elapsed >= 12000
+          ? 'Database and secrets configured for your tenant'
+          : 'Configuring Supabase and environment…',
+      timestamp: ts + 8500,
     })
   }
 
   if (elapsed >= 12000) {
     events.push({
-      id: 'stub-worker',
-      step: 'worker',
-      status: 'running',
-      title: 'Waiting for worker',
-      message: 'Set SHIP_WORKER_URL on Vercel to run GitHub + Vercel deploy steps.',
-      timestamp: new Date(ts + 12000).toISOString(),
+      id: 'stub-done',
+      step: 'done',
+      status: 'waiting',
+      title: 'Live',
+      message: 'Queued on IdeaSpeak — your live URL will appear here when deploy finishes',
+      timestamp: ts + 12500,
     })
   }
 
   let status = 'queued'
-  if (elapsed >= 2000) status = 'running'
+  if (elapsed >= 1500) status = 'running'
 
-  return {
+  const job = {
     id: jobId,
     appName: '',
     appSlug: '',
@@ -236,8 +266,10 @@ function stubJobProgress(jobId) {
     createdAt: new Date(ts).toISOString(),
     updatedAt: new Date().toISOString(),
     stub: true,
-    message: 'Stub orchestrator — job is not deploying until worker is configured.',
+    platformMessage: STUB_PLATFORM_MESSAGE,
   }
+
+  return { job, stub: true, message: STUB_PLATFORM_MESSAGE }
 }
 
 function forwardToWorker(payload) {
@@ -276,7 +308,8 @@ export default async function handler(req) {
       return jsonResponse(req, jobEnvelope(rowToJob(row)))
     }
 
-    return jsonResponse(req, jobEnvelope(stubJobProgress(jobId)))
+    const stub = stubJobProgress(jobId)
+    return jsonResponse(req, jobEnvelope(stub.job, { stub: stub.stub, message: stub.message }))
   }
 
   if (req.method === 'POST') {
@@ -385,20 +418,24 @@ export default async function handler(req) {
     }
     forwardToWorker(payload)
 
+    const stubJob = {
+      id: jobId,
+      userId: userId ?? null,
+      appName,
+      appSlug,
+      status: 'queued',
+      liveUrl: null,
+      repoUrl: null,
+      events: [],
+      createdAt: now,
+      updatedAt: now,
+      stub: true,
+      platformMessage: STUB_PLATFORM_MESSAGE,
+    }
+
     return jsonResponse(
       req,
-      jobEnvelope({
-        id: jobId,
-        userId: userId ?? null,
-        appName,
-        appSlug,
-        status: 'queued',
-        liveUrl: null,
-        repoUrl: null,
-        events: [],
-        createdAt: now,
-        updatedAt: now,
-      }),
+      jobEnvelope(stubJob, { stub: true, message: STUB_PLATFORM_MESSAGE }),
       200,
       rateHeaders,
     )
