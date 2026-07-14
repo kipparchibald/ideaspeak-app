@@ -21,7 +21,8 @@
     "setup:grok": "bash scripts/setup-local-grok.sh",
     "verify:grok": "bun scripts/verify-grok.mjs",
     "setup:in-house": "bun scripts/setup-in-house.mjs",
-    "verify:in-house": "bun scripts/verify-in-house.mjs"
+    "verify:in-house": "bun scripts/verify-in-house.mjs",
+    "walkthrough:in-house": "bun scripts/walkthrough-in-house.mjs"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.20.0",

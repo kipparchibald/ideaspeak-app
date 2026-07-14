@@ -42,6 +42,8 @@ import { VisionRefinePanel, VISION_REFINE_CHIP } from './components/VisionRefine
 import { GalleryPanel } from './components/GalleryPanel'
 import { CouncilPanel } from './components/CouncilPanel'
 import { LaunchAutopilotPanel } from './components/LaunchAutopilotPanel'
+import { PlatformReadinessChip } from './components/PlatformReadinessChip'
+import { IN_HOUSE_PLATFORM } from './lib/platform'
 
 import {
   buildProductionScaffold,
@@ -2328,6 +2330,13 @@ export default function App() {
                   <Users size={13} />
                   <span className="hidden sm:inline">Council</span>
                 </button>
+                {IN_HOUSE_PLATFORM && (
+                  <PlatformReadinessChip
+                    appSlug={loadShipPrefs().appSlug}
+                    hasBuilt={hasBuilt}
+                    onOpenLaunch={() => setShowAutopilot(true)}
+                  />
+                )}
                 <button
                   onClick={() => setShowAutopilot(true)}
                   disabled={!hasBuilt}

@@ -23,6 +23,9 @@ const PROVISIONING_DETAIL =
 const LIVE_HEADLINE = 'Platform ready'
 const LIVE_DETAIL = 'IdeaSpeak will provision GitHub, Vercel, and your live URL automatically.'
 
+const CACHE_MS = 60_000
+let readinessCache: { at: number; slug?: string; value: PlatformReadiness } | null = null
+
 function apiBase(path: string): string {
   if (typeof window !== 'undefined') return path
   const base = process.env.IDEASPEAK_API || 'http://localhost:3001'
@@ -30,7 +33,19 @@ function apiBase(path: string): string {
 }
 
 /** Quick probe — safe to call on panel open (no secrets). */
-export async function fetchPlatformReadiness(appSlug?: string): Promise<PlatformReadiness> {
+export async function fetchPlatformReadiness(
+  appSlug?: string,
+  opts?: { force?: boolean },
+): Promise<PlatformReadiness> {
+  if (
+    !opts?.force &&
+    readinessCache &&
+    Date.now() - readinessCache.at < CACHE_MS &&
+    readinessCache.slug === appSlug
+  ) {
+    return readinessCache.value
+  }
+
   let grokLive = false
   let supabaseConnected = false
   let shipWorkerLive = false
@@ -88,7 +103,7 @@ export async function fetchPlatformReadiness(appSlug?: string): Promise<Platform
 
   const targetUrl = appSlug ? fabricLiveUrl(appSlug) : undefined
 
-  return {
+  const value: PlatformReadiness = {
     tier,
     grokLive,
     supabaseConnected,
@@ -104,6 +119,9 @@ export async function fetchPlatformReadiness(appSlug?: string): Promise<Platform
           : 'Checking Grok connection…',
     targetUrl,
   }
+
+  readinessCache = { at: Date.now(), slug: appSlug, value }
+  return value
 }
 
 export function provisioningLaunchCopy(appSlug: string): {

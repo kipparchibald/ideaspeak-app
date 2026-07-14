@@ -1,5 +1,9 @@
 # IdeaSpeak in-house platform — fill in, then run: bun run setup:in-house --apply
 # Never commit this file with real values. Copy to config/in-house-setup.local (gitignored).
+#
+# Guided setup:  bun run walkthrough:in-house --init
+#                bun run walkthrough:in-house        # step-by-step checklist
+#                bun run walkthrough:in-house --check
 
 # ── Supabase (https://supabase.com/dashboard → your project → Settings → API) ──
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co

@@ -42,11 +42,20 @@ import { getSupabaseUser } from '../lib/supabase'
 import {
   startShipJob,
   pollShipJob,
+  fetchShipJob,
   ShipJobApiError,
   formatShipChangelog,
   getLastDeployChange,
   type ShipJobEvent,
+  type ShipJobRecord,
 } from '../lib/ship-jobs'
+import {
+  clearPersistedShipJob,
+  isActiveShipJob,
+  loadPersistedShipJob,
+  savePersistedShipJob,
+  syncPersistedShipJob,
+} from '../lib/ship-job-persist'
 import { speak } from '../lib/tts'
 import { IN_HOUSE_PLATFORM, PLATFORM_COPY } from '../lib/platform'
 import { fabricLiveUrl } from '../lib/fabric-tenant'
@@ -116,6 +125,8 @@ export function LaunchAutopilotPanel({
   const [deployChangelog, setDeployChangelog] = useState<string | null>(null)
   const [liveUrl, setLiveUrl] = useState(() => loadAutopilotState()?.liveUrl || '')
   const [platformReadiness, setPlatformReadiness] = useState<PlatformReadiness | null>(null)
+  const [resumingJob, setResumingJob] = useState(false)
+  const resumeAttemptedRef = useRef<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -143,6 +154,17 @@ export function LaunchAutopilotPanel({
       setPrefs(loaded)
     }
 
+    const persisted = loadPersistedShipJob()
+    if (persisted && persisted.appSlug === loaded.appSlug) {
+      if (persisted.events.length) setEvents(persisted.events)
+      if (persisted.deployChangelog) setDeployChangelog(persisted.deployChangelog)
+      if (persisted.liveUrl) setLiveUrl(persisted.liveUrl)
+      if (persisted.repoUrl && !loaded.githubRepoUrl) {
+        loaded.githubRepoUrl = persisted.repoUrl
+        setPrefs(loaded)
+      }
+    }
+
     if (IN_HOUSE_PLATFORM) {
       setPlatformReadiness(null)
       void fetchPlatformReadiness(loaded.appSlug)
@@ -150,6 +172,185 @@ export function LaunchAutopilotPanel({
         .catch(() => null)
     }
   }, [open, defaultAppName])
+
+  const pushTimelineEvent = useCallback((ev: LaunchTimelineEvent | ShipJobEvent) => {
+    setEvents((prev) => {
+      const idx = prev.findIndex((e) => e.id === ev.id)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = ev
+        return next
+      }
+      return [...prev, ev]
+    })
+    if (ev.step !== LaunchStep.done) setExpanded(ev.step)
+  }, [])
+
+  const update = (patch: Partial<ShipPreferences>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch }
+      if (patch.appName && !patch.appSlug) next.appSlug = slugify(patch.appName)
+      saveShipPrefs(next)
+      return next
+    })
+  }
+
+  const handleLiveUrl = useCallback((url: string) => {
+    const trimmed = url.trim()
+    setLiveUrl(trimmed)
+    if (trimmed) {
+      update({ vercelProjectUrl: trimmed })
+      saveAutopilotState({ liveUrl: trimmed })
+    }
+  }, [])
+
+  const applyServerShipResult = useCallback(
+    (final: ShipJobRecord, stubMode: boolean) => {
+      if (final.repoUrl) {
+        update({ githubRepoUrl: final.repoUrl })
+        saveAutopilotState({ repoUrl: final.repoUrl, lastSlug: prefs.appSlug })
+      }
+
+      const targetUrl = fabricLiveUrl(prefs.appSlug)
+      if (final.liveUrl) {
+        handleLiveUrl(final.liveUrl)
+      } else if (stubMode && IN_HOUSE_PLATFORM) {
+        handleLiveUrl(targetUrl)
+      }
+
+      setExpanded(LaunchStep.done)
+
+      if (stubMode) {
+        const copy = provisioningLaunchCopy(prefs.appSlug)
+        setDeployChangelog(copy.changelog)
+        savePersistedShipJob({
+          jobId: final.id,
+          appSlug: prefs.appSlug,
+          appName: prefs.appName,
+          status: final.status,
+          stub: true,
+          events: final.events,
+          deployChangelog: copy.changelog,
+          liveUrl: targetUrl,
+          repoUrl: final.repoUrl ?? undefined,
+        })
+        toast.message(copy.toastTitle, { description: copy.toastDetail })
+        void speak(copy.changelog, { provider: 'auto' }).catch(() => null)
+      } else {
+        const changelog = formatShipChangelog(final.events)
+        const summary = getLastDeployChange(final.events) || changelog
+        setDeployChangelog(summary)
+
+        if (final.status === 'success') {
+          syncPersistedShipJob(final, { deployChangelog: summary })
+          toast.success('Server Autopilot finished', {
+            description: changelog || final.liveUrl || 'Your app is deploying on the server',
+          })
+          void speak(changelog, { provider: 'auto' }).catch(() => null)
+        } else if (final.error) {
+          syncPersistedShipJob(final, { deployChangelog: summary })
+          toast.error(final.error)
+        } else {
+          syncPersistedShipJob(final, { deployChangelog: summary })
+        }
+      }
+    },
+    [prefs.appSlug, prefs.appName, handleLiveUrl],
+  )
+
+  const runServerShipPipeline = useCallback(
+    async (
+      scaffold: Record<string, string>,
+      signal: AbortSignal,
+      existingJobId?: string,
+    ) => {
+      let job: ShipJobRecord
+
+      if (existingJobId) {
+        job = await fetchShipJob(existingJobId)
+      } else {
+        const user = await getSupabaseUser()
+        const started = await startShipJob({
+          appName: prefs.appName,
+          appSlug: prefs.appSlug,
+          idea: defaultAppName,
+          userId: user?.id,
+          scaffoldFiles: scaffold,
+          scaffoldFileCount: Object.keys(scaffold).length,
+        })
+        job = started.job
+        savePersistedShipJob({
+          jobId: job.id,
+          appSlug: prefs.appSlug,
+          appName: prefs.appName,
+          status: job.status,
+          stub: job.stub,
+          events: job.events,
+        })
+      }
+
+      setEvents(job.events)
+      syncPersistedShipJob(job)
+
+      const isStubJob = job.stub === true
+      const final = await pollShipJob(job.id, {
+        signal,
+        onEvent: (ev) => {
+          pushTimelineEvent(ev)
+          const prev = loadPersistedShipJob()
+          const base = prev?.events ?? job.events
+          const idx = base.findIndex((e) => e.id === ev.id)
+          const nextEvents =
+            idx >= 0 ? base.map((e, i) => (i === idx ? ev : e)) : [...base, ev]
+          savePersistedShipJob({
+            jobId: job.id,
+            appSlug: prefs.appSlug,
+            appName: prefs.appName,
+            status: 'running',
+            stub: job.stub,
+            events: nextEvents,
+          })
+        },
+        stubTimeoutMs: isStubJob ? 18_000 : undefined,
+      })
+
+      const stubMode = final.stub === true || isStubJob
+      applyServerShipResult(final, stubMode)
+    },
+    [prefs, defaultAppName, pushTimelineEvent, applyServerShipResult],
+  )
+
+  useEffect(() => {
+    if (!open || !useServerAutopilot || !hasBuilt) return
+
+    const persisted = loadPersistedShipJob()
+    if (!persisted || persisted.appSlug !== prefs.appSlug) return
+    if (resumeAttemptedRef.current === persisted.jobId) return
+    if (!isActiveShipJob(persisted)) return
+
+    resumeAttemptedRef.current = persisted.jobId
+    setResumingJob(true)
+    setLaunching(true)
+
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
+    void (async () => {
+      try {
+        const scaffold = await getScaffoldFiles(prefs)
+        await runServerShipPipeline(scaffold, ac.signal, persisted.jobId)
+      } catch (err) {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          const msg = err instanceof Error ? err.message : 'Could not resume deploy'
+          toast.error(msg)
+        }
+      } finally {
+        setLaunching(false)
+        setResumingJob(false)
+      }
+    })()
+  }, [open, useServerAutopilot, hasBuilt, prefs.appSlug, getScaffoldFiles, runServerShipPipeline])
 
   const stepStatus = useMemo(() => {
     const map = new Map<LaunchStep, LaunchTimelineEvent>()
@@ -159,6 +360,8 @@ export function LaunchAutopilotPanel({
     }
     return map
   }, [events])
+
+  const persistedJob = useMemo(() => loadPersistedShipJob(), [events, launching, resumingJob, prefs.appSlug])
 
   const launchProgress = useMemo(() => {
     const order = LAUNCH_STEPS.map((s) => s.id)
@@ -174,15 +377,6 @@ export function LaunchAutopilotPanel({
     [prefs.supabase.url, prefs.supabase.anonKey],
   )
 
-  const update = (patch: Partial<ShipPreferences>) => {
-    setPrefs((prev) => {
-      const next = { ...prev, ...patch }
-      if (patch.appName && !patch.appSlug) next.appSlug = slugify(patch.appName)
-      saveShipPrefs(next)
-      return next
-    })
-  }
-
   const saveToken = (value: string) => {
     setGithubToken(value)
     saveGithubToken(value)
@@ -196,28 +390,6 @@ export function LaunchAutopilotPanel({
       toast.error('Could not copy')
     }
   }
-
-  const handleLiveUrl = (url: string) => {
-    const trimmed = url.trim()
-    setLiveUrl(trimmed)
-    if (trimmed) {
-      update({ vercelProjectUrl: trimmed })
-      saveAutopilotState({ liveUrl: trimmed })
-    }
-  }
-
-  const pushTimelineEvent = useCallback((ev: LaunchTimelineEvent | ShipJobEvent) => {
-    setEvents((prev) => {
-      const idx = prev.findIndex((e) => e.id === ev.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = ev
-        return next
-      }
-      return [...prev, ev]
-    })
-    if (ev.step !== LaunchStep.done) setExpanded(ev.step)
-  }, [])
 
   const runClientAutopilot = useCallback(
     async (scaffold: Record<string, string>, signal: AbortSignal) => {
@@ -273,59 +445,9 @@ export function LaunchAutopilotPanel({
 
       if (useServerAutopilot) {
         try {
-          const user = await getSupabaseUser()
-          const { job } = await startShipJob({
-            appName: prefs.appName,
-            appSlug: prefs.appSlug,
-            idea: defaultAppName,
-            userId: user?.id,
-            scaffoldFiles: scaffold,
-            scaffoldFileCount: Object.keys(scaffold).length,
-          })
-
-          for (const ev of job.events) pushTimelineEvent(ev)
-
-          const isStubJob = job.stub === true
-          const final = await pollShipJob(job.id, {
-            signal: ac.signal,
-            onEvent: pushTimelineEvent,
-            stubTimeoutMs: isStubJob ? 18_000 : undefined,
-          })
-
-          const stubMode = final.stub === true || isStubJob
-
-          if (final.repoUrl) {
-            update({ githubRepoUrl: final.repoUrl })
-            saveAutopilotState({ repoUrl: final.repoUrl })
-          }
-
-          const targetUrl = fabricLiveUrl(prefs.appSlug)
-          if (final.liveUrl) {
-            handleLiveUrl(final.liveUrl)
-          } else if (stubMode && IN_HOUSE_PLATFORM) {
-            handleLiveUrl(targetUrl)
-          }
-
-          setExpanded(LaunchStep.done)
-
-          if (stubMode) {
-            const copy = provisioningLaunchCopy(prefs.appSlug)
-            setDeployChangelog(copy.changelog)
-            toast.message(copy.toastTitle, { description: copy.toastDetail })
-            void speak(copy.changelog, { provider: 'auto' }).catch(() => null)
-          } else {
-            const changelog = formatShipChangelog(final.events)
-            setDeployChangelog(getLastDeployChange(final.events) || changelog)
-
-            if (final.status === 'success') {
-              toast.success('Server Autopilot finished', {
-                description: changelog || final.liveUrl || 'Your app is deploying on the server',
-              })
-              void speak(changelog, { provider: 'auto' }).catch(() => null)
-            } else if (final.error) {
-              toast.error(final.error)
-            }
-          }
+          clearPersistedShipJob()
+          resumeAttemptedRef.current = null
+          await runServerShipPipeline(scaffold, ac.signal)
           return
         } catch (serverErr) {
           if (IN_HOUSE_PLATFORM) throw serverErr
@@ -358,6 +480,7 @@ export function LaunchAutopilotPanel({
     defaultAppName,
     pushTimelineEvent,
     runClientAutopilot,
+    runServerShipPipeline,
   ])
 
   const cancelLaunch = () => {
@@ -495,6 +618,23 @@ export function LaunchAutopilotPanel({
               {!hasBuilt && (
                 <div className="mb-4 rounded-xl border border-[#fa0]/25 bg-[#fa0]/08 px-3 py-2.5 text-[12px] text-[#fa0]">
                   Build an app in preview first — Autopilot ships that version.
+                </div>
+              )}
+
+              {resumingJob && (
+                <div className="mb-4 rounded-xl border border-[#7dd3fc]/30 bg-[#7dd3fc]/08 px-3 py-2.5 text-[12px] text-[#7dd3fc] flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin shrink-0" />
+                  Resuming your deploy — timeline updates automatically.
+                </div>
+              )}
+
+              {!resumingJob && !launching && persistedJob?.appSlug === prefs.appSlug && (
+                <div className="mb-4 rounded-xl border border-[#1f1f27] bg-[#111116] px-3 py-2.5 text-[12px] text-[#888]">
+                  {isActiveShipJob(persistedJob)
+                    ? 'Deploy still in progress — reopening will resume polling.'
+                    : persistedJob.stub
+                      ? provisioningLaunchCopy(prefs.appSlug).changelog
+                      : 'Previous launch saved — run Launch again to ship a fresh build.'}
                 </div>
               )}
 
