@@ -10,7 +10,7 @@
 
 ---
 
-## Current Score: **8.2 / 10**
+## Current Score: **9.0 / 10**
 
 ### Done recently
 - Voice-first UI: large Tap-to-speak mic, Chat → Build → Preview flow
