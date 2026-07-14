@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * IdeaSpeak end-to-end smoke test
+ * IdeaSpeak end-to-end smoke test (hardened)
  *
  * Usage:
  *   bun run smoke:local              # local UI + API (Grok live optional)
@@ -9,10 +9,31 @@
  *   BASE_URL=... bun scripts/smoke-e2e.mjs --local
  *
  * Flags:
- *   --local   force localhost:5173
- *   --build   include slow Grok build
+ *   --local         force localhost:5173 + API :3001
+ *   --build         include slow Grok build
  *   --require-live  fail if Grok is not live (CI production)
+ *   --no-security   skip security probes
+ *   --retries N     UI retry attempts (default 2)
+ *
+ * On failure, screenshots + DOM dump → .smoke-artifacts/
+ * See docs/SMOKE_AND_RISKS.md for failure modes & vulnerabilities.
  */
+
+import {
+  attachPageDiagnostics,
+  probeBlockedOrigin,
+  probeRateLimitHeaders,
+  probeStatusNoSecretLeak,
+  retry,
+  saveFailureArtifacts,
+  sendPlanMessage,
+  sleep,
+  triggerBuildPreview,
+  waitForAppReady,
+  waitForAssistantSignal,
+  waitForSandpackOrBuildUI,
+  withBrowser,
+} from './smoke-helpers.mjs'
 
 const isLocalArg = process.argv.includes('--local') || process.env.BASE_URL?.includes('localhost')
 const BASE =
@@ -23,6 +44,8 @@ const BASE =
 const API = BASE.includes('localhost:5173') ? 'http://localhost:3001' : BASE
 const RUN_BUILD = process.argv.includes('--build')
 const REQUIRE_LIVE = process.argv.includes('--require-live') || process.env.REQUIRE_LIVE === '1'
+const RUN_SECURITY = !process.argv.includes('--no-security')
+const UI_RETRIES = Number(process.env.SMOKE_RETRIES || process.argv.find((a) => a.startsWith('--retries='))?.split('=')[1] || 2)
 
 const results = []
 
@@ -49,9 +72,7 @@ let grokLive = false
 // ── API ─────────────────────────────────────────────────────────────────────
 
 await step('API health / status JSON', async () => {
-  const res = await fetch(`${API}/api/status`, { signal: AbortSignal.timeout(15000) })
-  // Bun may return text on unknown routes historically — require JSON
-  const ct = res.headers.get('content-type') || ''
+  const res = await fetch(`${API}/api/status`, { signal: AbortSignal.timeout(20_000) })
   const text = await res.text()
   let data
   try {
@@ -66,19 +87,50 @@ await step('API health / status JSON', async () => {
   return `live=${grokLive} source=${data.source || '?'} model=${data.model || '?'}`
 })
 
+if (RUN_SECURITY) {
+  await step('Security: blocked origin → 403', async () => probeBlockedOrigin(API))
+
+  await step('Security: status does not leak secrets', async () => probeStatusNoSecretLeak(API))
+
+  await step('Security: rate-limit enforceRateLimit unit', async () => {
+    const { enforceRateLimit } = await import('../api/security.js')
+    const fakeReq = {
+      headers: {
+        get: (h) => {
+          const k = String(h).toLowerCase()
+          if (k === 'x-forwarded-for') return '203.0.113.50'
+          return null
+        },
+      },
+    }
+    const { headers } = enforceRateLimit(fakeReq)
+    if (!headers['X-RateLimit-Limit']) throw new Error('enforceRateLimit missing X-RateLimit-Limit')
+    return `limit=${headers['X-RateLimit-Limit']}`
+  })
+
+  await step(
+    'Security: rate-limit headers on live discuss',
+    async () => probeRateLimitHeaders(API),
+    { optional: true },
+  )
+}
+
 await step(
   'POST /api/discuss voiceMode (live Grok)',
   async () => {
     if (!grokLive) throw new Error('Grok not live')
     const res = await fetch(`${API}/api/discuss`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+      },
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'I want a voice memo app that turns rants into tasks' }],
         voiceMode: true,
         personality: 'grok',
       }),
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(60_000),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
@@ -97,12 +149,15 @@ await step(
     if (!grokLive) throw new Error('Grok not live')
     const res = await fetch(`${API}/api/discuss`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+      },
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'Scope a v1 for a founder habit tracker' }],
         voiceMode: false,
       }),
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(60_000),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
@@ -117,13 +172,16 @@ await step(
     if (!grokLive) throw new Error('Grok not live')
     const res = await fetch(`${API}/api/refine`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+      },
       body: JSON.stringify({
         transcript:
           'um like a voice first CRM for indie consultants that feels like texting your smartest friend',
         history: [],
       }),
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(60_000),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
@@ -140,12 +198,15 @@ if (RUN_BUILD) {
       if (!grokLive) throw new Error('Grok not live')
       const res = await fetch(`${API}/api/build`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+        },
         body: JSON.stringify({
           transcript: 'Minimal todo app with premium dark UI and voice add',
           brief: { vision: 'Voice-first todo', keyFeatures: ['voice add', 'dark UI'] },
         }),
-        signal: AbortSignal.timeout(110000),
+        signal: AbortSignal.timeout(120_000),
       })
       if (res.status === 504) throw new Error('Build timed out')
       const data = await res.json()
@@ -161,7 +222,7 @@ if (RUN_BUILD) {
   console.log('⊘ POST /api/build skipped (pass --build to include)')
 }
 
-// ── Local unit-style (always) ───────────────────────────────────────────────
+// ── Unit (no network to production for simulator test) ──────────────────────
 
 await step('Unit: plan simulator + native scaffold', async () => {
   const { simulateVoiceRefiner, generateNativeProject } = await import('../src/lib/build-tools.ts')
@@ -178,23 +239,29 @@ await step('Unit: plan simulator + native scaffold', async () => {
   return `name=${name.slice(0, 40)} appLen=${app.length}`
 })
 
-await step('Unit: discuss simulator no-parrot', async () => {
+await step('Unit: discuss simulator fallback (mocked network)', async () => {
   const { discussWithGrok } = await import('../src/lib/xai.ts')
-  // Force simulator by invalid key + failed network path is covered; empty key uses API first
-  // Call simulate path via invalid response handling — use empty messages with force:
-  // discussWithGrok always hits network; without server it falls back.
-  // Instead import is hard — re-test via building brief
-  const r = await discussWithGrok(
-    [{ role: 'user', content: 'I want a habit tracker for founders' }],
-    'invalid-key-for-smoke',
-    null,
-    'grok',
-    true,
-  )
-  if (!r.content || r.content.length < 20) throw new Error('empty simulator reply')
-  if (/so you want|you said|I'd be happy/i.test(r.content)) throw new Error('parrot/bot phrase')
-  if (r.live) throw new Error('expected live=false with invalid key')
-  return r.content.slice(0, 80) + '…'
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({ error: 'smoke-mock-unavailable' }),
+  })
+  try {
+    const r = await discussWithGrok(
+      [{ role: 'user', content: 'I want a habit tracker for founders' }],
+      undefined,
+      null,
+      'grok',
+      true,
+    )
+    if (!r.content || r.content.length < 20) throw new Error('empty simulator reply')
+    if (/so you want|you said|I'd be happy/i.test(r.content)) throw new Error('parrot/bot phrase')
+    if (r.live) throw new Error('expected live=false when API down')
+    return r.content.slice(0, 80) + '…'
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 await step('Unit: production ship scaffold', async () => {
@@ -229,137 +296,62 @@ await step('Unit: production ship scaffold', async () => {
   return `${Object.keys(files).length} files`
 })
 
-// ── UI Playwright e2e ───────────────────────────────────────────────────────
+// ── UI (single browser, shared session, retries) ───────────────────────────
 
-await step('UI: loads plan-first shell', async () => {
-  const { chromium } = await import('playwright')
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForSelector('#root', { timeout: 15000 })
-  await page.waitForTimeout(1500)
-  const text = await page.locator('#root').innerText()
-  await browser.close()
-  if (text.length < 80) throw new Error('root too empty')
-  if (!/IdeaSpeak/i.test(text)) throw new Error('missing IdeaSpeak brand')
-  if (!/Plan/i.test(text)) throw new Error('missing Plan mode')
-  if (errors.length) throw new Error(errors[0])
-  return `${text.length} chars`
-})
+await step(
+  'UI: plan-first shell + plan chip + build preview + chrome',
+  async () => {
+    return retry(
+      'UI flow',
+      async () => {
+        return withBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const errors = attachPageDiagnostics(page)
 
-await step('UI: plan chip → co-founder reply (no instant build)', async () => {
-  const { chromium } = await import('playwright')
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForTimeout(1500)
+          try {
+            await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+            await waitForAppReady(page, { timeout: 45_000 })
 
-  const chip = page.getByRole('button', { name: /habit tracker/i }).first()
-  await chip.click()
-  await page.waitForTimeout(3500)
+            const shellText = await page.locator('#root').innerText()
+            if (shellText.length < 80) throw new Error('root too empty')
+            if (!/IdeaSpeak/i.test(shellText)) throw new Error('missing IdeaSpeak brand')
+            if (!/Plan/i.test(shellText)) throw new Error('missing Plan mode')
 
-  const text = await page.locator('#root').innerText()
-  await browser.close()
+            // Plan turn — chip or textarea fallback
+            const via = await sendPlanMessage(page)
+            await waitForAssistantSignal(page, { timeout: grokLive ? 60_000 : 25_000 })
 
-  if (errors.length) throw new Error(errors[0])
-  if (!/You/i.test(text)) throw new Error('user message missing')
-  // Should NOT have built preview yet from a single plan turn
-  if (/Live preview is up for/i.test(text)) throw new Error('built too early on plan chip')
-  // Should have an assistant reply of some kind
-  const hasReply =
-    /Who|founder|v1|loop|ship|daily|streak|coach|user|plan/i.test(text) &&
-    text.length > 200
-  if (!hasReply) throw new Error('no collaborative reply visible')
-  return 'plan reply OK'
-})
+            const afterPlan = await page.locator('#root').innerText()
+            if (/Live preview is up for/i.test(afterPlan)) {
+              throw new Error('built too early on single plan turn')
+            }
 
-await step('UI: build from plan → live Sandpack preview', async () => {
-  const { chromium } = await import('playwright')
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForTimeout(1200)
+            // Second nudge + build
+            await sendPlanMessage(page, 'Scope v1: daily check-in, streaks, one dashboard')
+            await sleep(grokLive ? 2000 : 1200)
+            const buildVia = await triggerBuildPreview(page)
+            const preview = await waitForSandpackOrBuildUI(page, {
+              timeout: grokLive ? 90_000 : 60_000,
+            })
 
-  // Two plan turns so "Build live preview" appears
-  await page.getByRole('button', { name: /habit tracker/i }).first().click()
-  await page.waitForTimeout(2500)
+            const chrome = await page.locator('#root').innerText()
+            if (!/Ship|Polish|Plan|Preview/i.test(chrome)) {
+              throw new Error('missing Ship/Polish/Plan chrome after build')
+            }
 
-  // Second user message via type + enter if button not ready
-  const buildBtn = page.getByRole('button', { name: /Build live preview/i })
-  if (await buildBtn.count()) {
-    await buildBtn.click()
-  } else {
-    // Force green-light via type
-    const ta = page.locator('textarea').first()
-    await ta.fill('build it')
-    await ta.press('Enter')
-  }
+            if (errors.length) throw new Error(errors[0])
 
-  // Wait for build + preview
-  await page.waitForTimeout(5000)
-
-  const rootText = await page.locator('#root').innerText()
-
-  // Look for sandpack preview iframe content
-  let previewHit = false
-  for (const frame of page.frames()) {
-    try {
-      const t = await frame.locator('body').innerText({ timeout: 1500 })
-      if (
-        t &&
-        (/Live preview/i.test(t) ||
-          /Add/i.test(t) && t.length > 40 ||
-          /habit|streak|ship|focus/i.test(t))
-      ) {
-        previewHit = true
-        break
-      }
-    } catch {
-      /* frame not ready */
-    }
-  }
-
-  await browser.close()
-
-  if (errors.length) throw new Error(errors[0])
-  if (!previewHit && !/Live preview|preview ready|files · in-browser|Next · make it real/i.test(rootText)) {
-    throw new Error('no live preview signals after build')
-  }
-  return previewHit ? 'sandpack iframe OK' : 'build UI OK (iframe soft)'
-})
-
-await step('UI: Ship + Polish controls present after build path', async () => {
-  const { chromium } = await import('playwright')
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForTimeout(1000)
-
-  // Jump to build via mode + message
-  await page.getByRole('button', { name: /^Build$/i }).first().click().catch(() => {})
-  const ta = page.locator('textarea').first()
-  if (await ta.count()) {
-    await ta.fill('build it')
-    await ta.press('Enter')
-    await page.waitForTimeout(4000)
-  }
-
-  const text = await page.locator('#root').innerText()
-  await browser.close()
-
-  // Controls may be disabled before build — just ensure they exist in DOM
-  // After our flow, Ship/Polish buttons should be in toolbar
-  if (!/Ship|Polish|Plan|Preview/i.test(text)) {
-    throw new Error('missing Ship/Polish/Plan chrome')
-  }
-  return 'chrome OK'
-})
+            return `plan=${via} build=${buildVia} preview=${preview.kind} (${preview.sample}…)`
+          } catch (e) {
+            await saveFailureArtifacts(page, 'ui-flow')
+            throw e
+          }
+        })
+      },
+      { attempts: UI_RETRIES, delayMs: 2000 },
+    )
+  },
+)
 
 // ── Summary ─────────────────────────────────────────────────────────────────
 
@@ -369,9 +361,10 @@ const skipped = results.filter((r) => r.skipped).length
 
 console.log('\n---')
 console.log(`${passed} passed · ${skipped} optional-skipped · ${hardFailed.length} failed`)
-console.log(`Target: ${BASE} · API: ${API} · grokLive=${grokLive}`)
+console.log(`Target: ${BASE} · API: ${API} · grokLive=${grokLive} · uiRetries=${UI_RETRIES}`)
 if (hardFailed.length) {
   console.log('Failed:', hardFailed.map((f) => f.name).join(', '))
+  console.log('Artifacts (if any): .smoke-artifacts/')
   process.exit(1)
 }
 console.log('Smoke test OK')

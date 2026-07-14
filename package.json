@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "smoke": "bun scripts/smoke-e2e.mjs",
     "smoke:full": "bun scripts/smoke-e2e.mjs --build",
+    "smoke:prod": "REQUIRE_LIVE=1 bun scripts/smoke-e2e.mjs",
     "smoke:local": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs --local",
     "smoke:local:live": "BASE_URL=http://localhost:5173 bun scripts/smoke-e2e.mjs --local --require-live",
     "e2e:voice-preview": "BASE_URL=http://localhost:5173 bun scripts/e2e-voice-preview.mjs",

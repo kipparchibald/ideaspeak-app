@@ -1,6 +1,6 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 import { chatCompletion, getApiKey, xaiError } from './xai.js'
-import { corsHeaders, rejectBlockedOrigin, rejectRateLimited } from './security.js'
+import { corsHeaders, rejectBlockedOrigin, enforceRateLimit } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -12,7 +12,7 @@ export default async function handler(req) {
   const blocked = rejectBlockedOrigin(req)
   if (blocked) return blocked
 
-  const limited = rejectRateLimited(req)
+  const { blocked: limited, headers: rateHeaders } = enforceRateLimit(req)
   if (limited) return limited
 
   const apiKey = getApiKey(req)
@@ -81,6 +81,6 @@ export default async function handler(req) {
   }
 
   return new Response(JSON.stringify({ content, voiceMode: !!voiceMode }), {
-    headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders(req), ...rateHeaders, 'Content-Type': 'application/json' },
   })
 }

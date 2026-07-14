@@ -135,25 +135,37 @@ export function rateLimitHeaders(result) {
   }
 }
 
-/** Edge / Bun handler — returns 429 Response or null */
-export function rejectRateLimited(req) {
+/**
+ * Check rate limit once; return 429 Response or headers to attach on success.
+ * @returns {{ blocked: Response | null, headers: Record<string, string> }}
+ */
+export function enforceRateLimit(req) {
   const result = checkRateLimit(req)
-  if (result.allowed) return null
-  return new Response(
-    JSON.stringify({
-      error: 'Rate limit exceeded',
-      message: `Max ${RATE_LIMIT_MAX} requests per minute per IP`,
-      retryAfter: result.retryAfter,
-    }),
-    {
-      status: 429,
-      headers: {
-        ...corsHeaders(req),
-        ...rateLimitHeaders(result),
-        'Content-Type': 'application/json',
+  const headers = rateLimitHeaders(result)
+  if (result.allowed) return { blocked: null, headers }
+  return {
+    blocked: new Response(
+      JSON.stringify({
+        error: 'Rate limit exceeded',
+        message: `Max ${RATE_LIMIT_MAX} requests per minute per IP`,
+        retryAfter: result.retryAfter,
+      }),
+      {
+        status: 429,
+        headers: {
+          ...corsHeaders(req),
+          ...headers,
+          'Content-Type': 'application/json',
+        },
       },
-    },
-  )
+    ),
+    headers,
+  }
+}
+
+/** @deprecated use enforceRateLimit */
+export function rejectRateLimited(req) {
+  return enforceRateLimit(req).blocked
 }
 
 /** Node serverless handler (api/build.js) — returns true when blocked */
