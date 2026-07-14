@@ -23,6 +23,7 @@ import {
   LayoutGrid,
   ScanEye,
   Users,
+  History,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { runIdeaSpeakAgent, discussWithGrok, generateWithLLM } from './lib/xai'
@@ -62,7 +63,18 @@ import {
   applySuggestedFileEdits,
 } from './lib/vision-refine'
 import { remixWorkspace, type GalleryEntry } from './lib/gallery'
-import type { SavedWorkspace } from './lib/projects'
+import {
+  getActiveWorkspaceId,
+  getLastSession,
+  setActiveWorkspaceId,
+  type SavedWorkspace,
+} from './lib/projects'
+import {
+  isSubstantiveSession,
+  persistSessionSnapshot,
+  shouldRestoreWorkspace,
+} from './lib/session-history'
+import { SessionHistoryPanel } from './components/SessionHistoryPanel'
 import {
   canUse,
   recordUsage,
@@ -219,6 +231,13 @@ function workspaceFilesToGenerated(
   return out
 }
 
+const DEFAULT_OPENER =
+  "Hey — I'm Grok. Tap the mic for a real voice call with me (not browser text-to-speech). We'll plan a ruthless v1, then you say build it for a live preview."
+
+function defaultChatMessages(): ChatMessage[] {
+  return [{ role: 'assistant', content: DEFAULT_OPENER, timestamp: Date.now() }]
+}
+
 function hydrateFromWorkspace(ws: SavedWorkspace) {
   return {
     messages: ws.conversation.map((m, i) => ({
@@ -227,11 +246,12 @@ function hydrateFromWorkspace(ws: SavedWorkspace) {
       timestamp: Date.now() - (ws.conversation.length - i) * 1000,
     })),
     mode: ws.mode,
-    planReady: !!ws.buildPlan || ws.status !== 'discussing',
-    hasBuilt: ws.status === 'built',
+    planReady:
+      ws.planReady ?? (!!ws.buildPlan || ws.status === 'planned' || ws.status === 'built'),
+    hasBuilt: ws.status === 'built' || !!ws.currentProject?.files,
     generatedFiles: workspaceFilesToGenerated(ws.currentProject?.files ?? {}),
     lastBuiltName: ws.currentProject?.name ?? ws.name,
-    lastBuildPlan: ws.buildPlan?.oneLiner ?? ws.summary,
+    lastBuildPlan: ws.lastBuildPlan ?? ws.buildPlan?.oneLiner ?? ws.summary,
     personality: (ws.selectedPersonality as Personality) || 'grok',
   }
 }
@@ -485,14 +505,7 @@ function SettingsModal({
 export default function App() {
   // Plan first (discuss), then build when ready — voice is collaborative, not parrot+generate
   const [mode, setMode] = useState<Mode>('discuss')
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: 'assistant',
-      content:
-        "Hey — I'm Grok. Tap the mic for a real voice call with me (not browser text-to-speech). We'll plan a ruthless v1, then you say build it for a live preview.",
-      timestamp: Date.now(),
-    },
-  ])
+  const [messages, setMessages] = useState<ChatMessage[]>(defaultChatMessages)
   const [planReady, setPlanReady] = useState(false)
   const voiceTurnRef = useRef(false)
   const [input, setInput] = useState('')
@@ -521,6 +534,11 @@ export default function App() {
   const [showVision, setShowVision] = useState(false)
   const [showCouncil, setShowCouncil] = useState(false)
   const [showAutopilot, setShowAutopilot] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() =>
+    getActiveWorkspaceId(),
+  )
+  const [sessionReady, setSessionReady] = useState(false)
   const [planId, setPlanIdState] = useState<PlanId>(() => getPlanId())
   const [lastBuiltName, setLastBuiltName] = useState('My IdeaSpeak App')
   const [lastBuildPlan, setLastBuildPlan] = useState('')
@@ -926,6 +944,112 @@ export default function App() {
     stopVoice,
     stopVoicePair,
     voiceStatus,
+  ])
+
+  const loadWorkspaceIntoApp = useCallback(
+    (ws: SavedWorkspace, opts?: { quiet?: boolean }) => {
+      stopVoice()
+      const h = hydrateFromWorkspace(ws)
+      messagesRef.current = h.messages
+      setMessages(h.messages)
+      setMode(h.mode)
+      setPlanReady(h.planReady)
+      setHasBuilt(h.hasBuilt)
+      if (h.hasBuilt && Object.keys(h.generatedFiles).length > 0) {
+        setGeneratedFiles(mergeProjectFiles(h.generatedFiles))
+        setPreviewRevision((n) => n + 1)
+      } else {
+        setGeneratedFiles(STARTER_FILES)
+      }
+      setLastBuiltName(h.lastBuiltName)
+      setLastBuildPlan(h.lastBuildPlan)
+      setPersonality(h.personality)
+      setActiveWorkspaceIdState(ws.id)
+      setActiveWorkspaceId(ws.id)
+      setShowWorkspace(true)
+      if (!opts?.quiet) {
+        toast.success(`Loaded “${ws.name}”`, {
+          description:
+            ws.status === 'built'
+              ? 'Preview restored — refine or ship'
+              : ws.status === 'planned'
+                ? 'Plan restored — say build it or tap Launch'
+                : 'Conversation restored — pick up where you left off',
+        })
+      }
+    },
+    [stopVoice],
+  )
+
+  const startNewSession = useCallback(() => {
+    stopVoice()
+    const newId = `ws-${Date.now().toString(36)}`
+    const opener = defaultChatMessages()
+    messagesRef.current = opener
+    setActiveWorkspaceIdState(newId)
+    setActiveWorkspaceId(newId)
+    setMessages(opener)
+    setMode('discuss')
+    setPlanReady(false)
+    setHasBuilt(false)
+    setGeneratedFiles(STARTER_FILES)
+    setLastBuiltName('My IdeaSpeak App')
+    setLastBuildPlan('')
+    setPreviewRevision((n) => n + 1)
+    setInput('')
+    setVoiceInterim('')
+  }, [stopVoice])
+
+  useEffect(() => {
+    const last = getLastSession()
+    if (last && shouldRestoreWorkspace(last)) {
+      loadWorkspaceIntoApp(last, { quiet: true })
+      toast.message('Resumed your last session', {
+        description: `${last.name} · open History to switch`,
+        duration: 5000,
+      })
+    } else if (last?.id) {
+      setActiveWorkspaceIdState(last.id)
+    } else {
+      const id = `ws-${Date.now().toString(36)}`
+      setActiveWorkspaceIdState(id)
+      setActiveWorkspaceId(id)
+    }
+    setSessionReady(true)
+  }, [loadWorkspaceIntoApp])
+
+  useEffect(() => {
+    if (!sessionReady) return
+    const timer = window.setTimeout(() => {
+      const msgs = messagesRef.current
+      if (!isSubstantiveSession(msgs)) return
+      const saved = persistSessionSnapshot({
+        workspaceId: activeWorkspaceId,
+        messages: msgs,
+        mode,
+        planReady,
+        hasBuilt,
+        generatedFiles,
+        lastBuiltName,
+        lastBuildPlan,
+        personality,
+      })
+      if (saved?.id && saved.id !== activeWorkspaceId) {
+        setActiveWorkspaceIdState(saved.id)
+      }
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [
+    sessionReady,
+    messages,
+    mode,
+    planReady,
+    hasBuilt,
+    generatedFiles,
+    lastBuiltName,
+    lastBuildPlan,
+    personality,
+    activeWorkspaceId,
   ])
 
   const revealLivePreview = useCallback(() => {
@@ -1343,31 +1467,22 @@ export default function App() {
     .join('\n')
     .slice(0, 4000)
 
-  const handleGalleryRemix = useCallback((entry: GalleryEntry) => {
-    const ws = remixWorkspace(entry)
-    if (!ws) {
-      toast.error('Could not remix', { description: 'Gallery entry not found' })
-      return
-    }
-    const h = hydrateFromWorkspace(ws)
-    setMessages(h.messages)
-    setMode(h.mode)
-    setPlanReady(h.planReady)
-    setHasBuilt(h.hasBuilt)
-    if (Object.keys(h.generatedFiles).length > 0) {
-      setGeneratedFiles(mergeProjectFiles(h.generatedFiles))
-      setPreviewRevision((n) => n + 1)
-    }
-    setLastBuiltName(h.lastBuiltName)
-    setLastBuildPlan(h.lastBuildPlan)
-    setPersonality(h.personality)
-    setShowWorkspace(true)
-    setWorkspaceTab('preview')
-    setMobilePanel('app')
-    toast.success(`Remixed “${entry.name}”`, {
-      description: 'Loaded into your workspace — refine by voice or ship',
-    })
-  }, [])
+  const handleGalleryRemix = useCallback(
+    (entry: GalleryEntry) => {
+      const ws = remixWorkspace(entry)
+      if (!ws) {
+        toast.error('Could not remix', { description: 'Gallery entry not found' })
+        return
+      }
+      loadWorkspaceIntoApp(ws)
+      setWorkspaceTab('preview')
+      setMobilePanel('app')
+      toast.success(`Remixed “${entry.name}”`, {
+        description: 'Loaded into your workspace — refine by voice or ship',
+      })
+    },
+    [loadWorkspaceIntoApp],
+  )
 
   const handleVisionApply = useCallback(
     async (refinementText: string, imageBase64: string | null) => {
@@ -1611,6 +1726,15 @@ export default function App() {
           >
             <Eye size={14} />
             {showWorkspace ? 'Focus chat' : 'Show app'}
+          </button>
+
+          <button
+            onClick={() => setShowHistory(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-2 sm:px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#7dd3fc] hover:border-[#7dd3fc]/35 transition-colors"
+            title="Session history"
+          >
+            <History size={14} />
+            <span className="hidden sm:inline">History</span>
           </button>
 
           <button
@@ -2424,6 +2548,14 @@ export default function App() {
           setShowPolish(false)
           setShowPricing(true)
         }}
+      />
+
+      <SessionHistoryPanel
+        open={showHistory}
+        onClose={() => setShowHistory(false)}
+        activeId={activeWorkspaceId}
+        onSelect={loadWorkspaceIntoApp}
+        onNewSession={startNewSession}
       />
 
       <GalleryPanel

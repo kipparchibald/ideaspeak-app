@@ -65,6 +65,9 @@ export interface SavedWorkspace {
   currentProject: CurrentProject | null
   selectedPersonality: string
   proactiveSuggestions: string[]
+  /** Voice/text plan locked — user can build */
+  planReady?: boolean
+  lastBuildPlan?: string
 }
 
 const WORKSPACES_KEY = 'ideaspeak_workspaces'
@@ -100,9 +103,13 @@ export function deriveWorkspaceSummary(state: {
 export function deriveWorkspaceStatus(state: {
   buildPlan?: BuildScaffoldPlan | null
   currentProject?: CurrentProject | null
+  planReady?: boolean
+  hasBuilt?: boolean
 }): WorkspaceStatus {
-  if (state.currentProject?.files && Object.keys(state.currentProject.files).length > 0) return 'built'
-  if (state.buildPlan) return 'planned'
+  if (state.hasBuilt || (state.currentProject?.files && Object.keys(state.currentProject.files).length > 0)) {
+    return 'built'
+  }
+  if (state.buildPlan || state.planReady) return 'planned'
   return 'discussing'
 }
 
@@ -115,6 +122,9 @@ export function captureWorkspace(state: {
   mode: 'discuss' | 'build'
   selectedPersonality: string
   proactiveSuggestions: string[]
+  planReady?: boolean
+  lastBuildPlan?: string
+  hasBuilt?: boolean
 }): SavedWorkspace {
   const now = new Date().toISOString()
   const id = state.activeWorkspaceId || `ws-${Date.now().toString(36)}`
@@ -122,7 +132,7 @@ export function captureWorkspace(state: {
   return {
     id,
     name: deriveWorkspaceName(state),
-    summary: deriveWorkspaceSummary(state),
+    summary: state.lastBuildPlan?.trim() || deriveWorkspaceSummary(state),
     status: deriveWorkspaceStatus(state),
     mode: state.mode,
     createdAt: existing?.createdAt || now,
@@ -133,6 +143,8 @@ export function captureWorkspace(state: {
     currentProject: state.currentProject,
     selectedPersonality: state.selectedPersonality,
     proactiveSuggestions: state.proactiveSuggestions,
+    planReady: state.planReady,
+    lastBuildPlan: state.lastBuildPlan,
   }
 }
 
