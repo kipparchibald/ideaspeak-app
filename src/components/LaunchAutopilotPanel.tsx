@@ -38,6 +38,13 @@ import {
   type LaunchEventStatus,
 } from '../lib/autopilot'
 import { loadShipPrefs, saveShipPrefs, slugify, type ShipPreferences } from '../lib/ship'
+import { getSupabaseUser } from '../lib/supabase'
+import {
+  startShipJob,
+  pollShipJob,
+  ShipJobApiError,
+  type ShipJobEvent,
+} from '../lib/ship-jobs'
 
 const STEP_ICONS: Record<LaunchStep, typeof FolderGit2> = {
   [LaunchStep.github]: FolderGit2,
@@ -94,9 +101,14 @@ export function LaunchAutopilotPanel({
   const [githubToken, setGithubToken] = useState(() => loadGithubToken())
   const [showToken, setShowToken] = useState(false)
   const [launching, setLaunching] = useState(false)
+  const [useServerAutopilot, setUseServerAutopilot] = useState(() => !loadGithubToken().trim())
   const [events, setEvents] = useState<LaunchTimelineEvent[]>([])
   const [liveUrl, setLiveUrl] = useState(() => loadAutopilotState()?.liveUrl || '')
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!githubToken.trim()) setUseServerAutopilot(true)
+  }, [githubToken])
 
   useEffect(() => {
     if (!open) return
@@ -170,22 +182,21 @@ export function LaunchAutopilotPanel({
     }
   }
 
-  const handleLaunch = useCallback(async () => {
-    if (!hasBuilt) {
-      toast.error('Build an app in preview first')
-      return
-    }
+  const pushTimelineEvent = useCallback((ev: LaunchTimelineEvent | ShipJobEvent) => {
+    setEvents((prev) => {
+      const idx = prev.findIndex((e) => e.id === ev.id)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = ev
+        return next
+      }
+      return [...prev, ev]
+    })
+    if (ev.step !== LaunchStep.done) setExpanded(ev.step)
+  }, [])
 
-    abortRef.current?.abort()
-    const ac = new AbortController()
-    abortRef.current = ac
-
-    setLaunching(true)
-    setEvents([])
-    setExpanded(LaunchStep.github)
-
-    try {
-      const scaffold = await getScaffoldFiles(prefs)
+  const runClientAutopilot = useCallback(
+    async (scaffold: Record<string, string>, signal: AbortSignal) => {
       const result = await runLaunchAutopilot({
         scaffoldFiles: scaffold,
         appName: prefs.appName,
@@ -195,19 +206,8 @@ export function LaunchAutopilotPanel({
         supabaseAnonKey: prefs.supabase.anonKey,
         customDomain: prefs.customDomain,
         existingRepoUrl: prefs.githubRepoUrl || undefined,
-        signal: ac.signal,
-        onProgress: (ev) => {
-          setEvents((prev) => {
-            const idx = prev.findIndex((e) => e.id === ev.id)
-            if (idx >= 0) {
-              const next = [...prev]
-              next[idx] = ev
-              return next
-            }
-            return [...prev, ev]
-          })
-          if (ev.step !== LaunchStep.done) setExpanded(ev.step)
-        },
+        signal,
+        onProgress: pushTimelineEvent,
         onOpenUrl: (url) => {
           window.open(url, '_blank', 'noopener,noreferrer')
         },
@@ -225,6 +225,74 @@ export function LaunchAutopilotPanel({
       toast.success('Launch Autopilot started', {
         description: 'Finish Vercel import in the other tab, then paste your live URL',
       })
+    },
+    [prefs, githubToken, liveUrl, pushTimelineEvent],
+  )
+
+  const handleLaunch = useCallback(async () => {
+    if (!hasBuilt) {
+      toast.error('Build an app in preview first')
+      return
+    }
+
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
+    setLaunching(true)
+    setEvents([])
+    setExpanded(LaunchStep.github)
+
+    try {
+      const scaffold = await getScaffoldFiles(prefs)
+
+      if (useServerAutopilot) {
+        try {
+          const user = await getSupabaseUser()
+          const { job } = await startShipJob({
+            appName: prefs.appName,
+            appSlug: prefs.appSlug,
+            idea: defaultAppName,
+            userId: user?.id,
+            scaffoldFiles: scaffold,
+            scaffoldFileCount: Object.keys(scaffold).length,
+          })
+
+          for (const ev of job.events) pushTimelineEvent(ev)
+
+          const final = await pollShipJob(job.id, {
+            signal: ac.signal,
+            onEvent: pushTimelineEvent,
+          })
+
+          if (final.repoUrl) {
+            update({ githubRepoUrl: final.repoUrl })
+            saveAutopilotState({ repoUrl: final.repoUrl })
+          }
+          if (final.liveUrl) {
+            handleLiveUrl(final.liveUrl)
+          }
+
+          setExpanded(LaunchStep.done)
+
+          if (final.status === 'success') {
+            toast.success('Server Autopilot finished', {
+              description: final.liveUrl || 'Your app is deploying on the server',
+            })
+          } else if (final.error) {
+            toast.error(final.error)
+          }
+          return
+        } catch (serverErr) {
+          const unavailable =
+            serverErr instanceof ShipJobApiError &&
+            (serverErr.status === 404 || serverErr.status === 501 || serverErr.status === 503)
+          if (!unavailable) throw serverErr
+          toast.message('Server Autopilot unavailable — using browser mode')
+        }
+      }
+
+      await runClientAutopilot(scaffold, ac.signal)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         toast.message('Launch cancelled')
@@ -235,7 +303,15 @@ export function LaunchAutopilotPanel({
     } finally {
       setLaunching(false)
     }
-  }, [hasBuilt, getScaffoldFiles, prefs, githubToken, liveUrl])
+  }, [
+    hasBuilt,
+    getScaffoldFiles,
+    prefs,
+    useServerAutopilot,
+    defaultAppName,
+    pushTimelineEvent,
+    runClientAutopilot,
+  ])
 
   const cancelLaunch = () => {
     abortRef.current?.abort()
@@ -312,6 +388,23 @@ export function LaunchAutopilotPanel({
                   />
                 </label>
               </div>
+
+              <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useServerAutopilot}
+                  onChange={(e) => setUseServerAutopilot(e.target.checked)}
+                  disabled={launching}
+                  className="rounded border-[#2a2a35] bg-[#111116] text-[#7dd3fc] focus:ring-[#7dd3fc]/30"
+                />
+                <span className="text-[11px] text-[#888]">
+                  <span className="font-semibold text-[#aaa]">Server Autopilot</span>
+                  {' — '}
+                  {!githubToken.trim()
+                    ? 'recommended (no GitHub token)'
+                    : 'run deploy on Railway server'}
+                </span>
+              </label>
 
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[11px] mb-1.5">

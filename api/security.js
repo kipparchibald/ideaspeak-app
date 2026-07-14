@@ -19,6 +19,7 @@ export const RATE_LIMITED_PATHS = new Set([
   '/api/build',
   '/api/discuss',
   '/api/refine',
+  '/api/ship',
   '/api/xai',
 ])
 

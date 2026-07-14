@@ -499,6 +499,76 @@ Rules:
       return Response.json({ received: true }, { headers })
     }
 
+    // ── Ship orchestrator (GitHub → Vercel → env → live) ───────────────────
+    if (url.pathname === '/api/ship' && req.method === 'POST') {
+      try {
+        const body = await req.json()
+        const appName = typeof body.appName === 'string' ? body.appName.trim() : ''
+        const appSlug = typeof body.appSlug === 'string' ? body.appSlug.trim() : ''
+        const scaffoldFiles =
+          body.scaffoldFiles && typeof body.scaffoldFiles === 'object'
+            ? (body.scaffoldFiles as Record<string, string>)
+            : null
+
+        if (!appName) {
+          return Response.json({ error: 'appName required' }, { status: 400, headers })
+        }
+        if (!appSlug) {
+          return Response.json({ error: 'appSlug required' }, { status: 400, headers })
+        }
+        if (!scaffoldFiles || Object.keys(scaffoldFiles).length === 0) {
+          return Response.json({ error: 'scaffoldFiles required (non-empty)' }, { status: 400, headers })
+        }
+
+        const { createShipJob, getShipJob, runShipJob, serializeShipJob } = await import(
+          './ship-orchestrator.js'
+        )
+
+        const jobId = createShipJob({
+          appName,
+          appSlug,
+          idea: typeof body.idea === 'string' ? body.idea : undefined,
+          userId: typeof body.userId === 'string' ? body.userId : undefined,
+        })
+
+        void runShipJob(jobId, {
+          appName,
+          appSlug,
+          idea: typeof body.idea === 'string' ? body.idea : undefined,
+          scaffoldFiles,
+          userId: typeof body.userId === 'string' ? body.userId : undefined,
+        }).catch((err: unknown) => {
+          console.error(`[ship] job ${jobId} failed:`, err)
+        })
+
+        const job = getShipJob(jobId)
+        return Response.json(
+          {
+            jobId,
+            status: job?.status ?? 'pending',
+            job: job ? serializeShipJob(job) : null,
+          },
+          { status: 202, headers },
+        )
+      } catch (e: any) {
+        return Response.json({ error: e?.message || 'Ship job failed' }, { status: 500, headers })
+      }
+    }
+
+    const shipJobMatch = url.pathname.match(/^\/api\/ship\/([^/]+)$/)
+    if (shipJobMatch && req.method === 'GET') {
+      try {
+        const { getShipJob, serializeShipJob } = await import('./ship-orchestrator.js')
+        const job = getShipJob(shipJobMatch[1])
+        if (!job) {
+          return Response.json({ error: 'Job not found' }, { status: 404, headers })
+        }
+        return Response.json({ job: serializeShipJob(job) }, { headers })
+      } catch (e: any) {
+        return Response.json({ error: e?.message || 'Status failed' }, { status: 500, headers })
+      }
+    }
+
     if (url.pathname === '/api/image' && req.method === 'POST') {
       if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
       try {
@@ -517,7 +587,7 @@ Rules:
     }
 
     return new Response(
-      'IdeaSpeak API — /health /api/voice/token /api/xai /api/refine /api/build /api/discuss /api/image /api/sandbox/* /api/stripe/checkout /api/stripe/webhook',
+      'IdeaSpeak API — /health /api/voice/token /api/xai /api/refine /api/build /api/discuss /api/ship /api/image /api/sandbox/* /api/stripe/checkout /api/stripe/webhook',
       { headers },
     )
   },

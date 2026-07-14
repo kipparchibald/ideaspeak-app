@@ -142,3 +142,34 @@ drop trigger if exists projects_set_updated_at on public.projects;
 create trigger projects_set_updated_at
   before update on public.projects
   for each row execute function public.set_updated_at();
+
+-- ── Deploy jobs (server ship orchestrator) ───────────────────────────────────
+create table if not exists public.deploy_jobs (
+  id text primary key,
+  user_id uuid references auth.users (id) on delete set null,
+  app_name text not null,
+  app_slug text not null,
+  status text not null default 'queued',
+  live_url text,
+  repo_url text,
+  events_json jsonb not null default '[]'::jsonb,
+  error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists deploy_jobs_user_created_idx
+  on public.deploy_jobs (user_id, created_at desc);
+
+alter table public.deploy_jobs enable row level security;
+
+create policy "Users read own deploy jobs"
+  on public.deploy_jobs for select
+  using (auth.uid() = user_id);
+
+-- Inserts/updates for deploy_jobs should go through service role (Railway server).
+
+drop trigger if exists deploy_jobs_set_updated_at on public.deploy_jobs;
+create trigger deploy_jobs_set_updated_at
+  before update on public.deploy_jobs
+  for each row execute function public.set_updated_at();
