@@ -24,6 +24,7 @@ import {
   ScanEye,
   Users,
   FolderOpen,
+  PencilLine,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { discussWithGrok, generateWithLLM } from './lib/xai'
@@ -1626,6 +1627,23 @@ export default function App() {
     setMode(next)
   }
 
+  const openManualEdit = useCallback(() => {
+    if (!hasBuilt) {
+      toast.message('Build first', {
+        description: 'Say build it or tap Build — then you can edit source beside the live preview.',
+      })
+      return
+    }
+    setPreviewFullscreen(false)
+    setShowWorkspace(true)
+    setWorkspaceTab('preview')
+    setMobilePanel('app')
+    toast.message('Manual edit', {
+      description: 'Edit files on the left — preview updates live on the right.',
+      duration: 3200,
+    })
+  }, [hasBuilt])
+
   const startBuildFromPlan = () => {
     const users = messages.filter((m) => m.role === 'user')
     if (users.length === 0) {
@@ -2216,6 +2234,12 @@ export default function App() {
                     <Eye size={13} /> Preview
                   </button>
                   <button
+                    onClick={openManualEdit}
+                    className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-[#00ff88]/35 bg-[#00ff88]/10 text-[12px] font-semibold text-[#00ff88] hover:bg-[#00ff88]/15"
+                  >
+                    <PencilLine size={13} /> Manual edit
+                  </button>
+                  <button
                     onClick={() => setShowPolish(true)}
                     className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-[#1f1f27] text-[12px] font-semibold text-[#ccc] hover:border-[#00ff88]/35 hover:text-[#00ff88]"
                   >
@@ -2520,6 +2544,17 @@ export default function App() {
                 {hasBuilt && (
                   <button
                     type="button"
+                    onClick={openManualEdit}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border border-[#00ff88]/35 bg-[#00ff88]/10 text-[#00ff88] hover:bg-[#00ff88]/15 transition-colors"
+                    title="Edit source beside live preview"
+                  >
+                    <PencilLine size={12} />
+                    Manual edit
+                  </button>
+                )}
+                {hasBuilt && (
+                  <button
+                    type="button"
                     onClick={() => setShowVision(true)}
                     className="hidden md:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold border border-[#00ff88]/30 bg-[#00ff88]/08 text-[#00ff88] hover:bg-[#00ff88]/12 transition-colors"
                   >
@@ -2584,6 +2619,16 @@ export default function App() {
                 >
                   <Mic size={12} />
                   <span className="hidden sm:inline">Pair</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openManualEdit}
+                  disabled={!hasBuilt}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[12px] transition-colors disabled:opacity-40 border-[#00ff88]/30 bg-[#00ff88]/08 text-[#00ff88] hover:bg-[#00ff88]/12 disabled:border-[#1f1f27] disabled:bg-transparent disabled:text-[#777]"
+                  title="Manual edit — source + live preview"
+                >
+                  <PencilLine size={12} />
+                  <span className="hidden sm:inline">Edit</span>
                 </button>
                 <button
                   onClick={() => {
