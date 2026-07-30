@@ -33,6 +33,8 @@ import {
   slugify,
   extractSupabaseRef,
   shipCommands,
+  vercelOneClickDeployUrl,
+  vercelEnvPasteLines,
   type ShipPreferences,
   type ShipStepId,
 } from '../lib/ship'
@@ -85,6 +87,11 @@ export function ShipPanel({
     return { done, total, pct }
   }, [prefs.checklist])
   const commands = useMemo(() => shipCommands(prefs), [prefs])
+  const deployUrl = useMemo(
+    () => vercelOneClickDeployUrl(prefs.githubRepoUrl),
+    [prefs.githubRepoUrl],
+  )
+  const hasRepo = Boolean(prefs.githubRepoUrl.trim())
 
   const update = (patch: Partial<ShipPreferences>) => {
     setPrefs((prev) => {
@@ -367,24 +374,26 @@ export function ShipPanel({
               {step === 'host' && (
                 <section className="space-y-4">
                   <StepIntro
-                    title="Host on Vercel"
-                    body="Fastest path: download ZIP → push GitHub (optional) → Import on Vercel. Or use the CLI. Env vars: same Supabase keys as Production."
+                    title="One-click host on Vercel"
+                    body="Always-on Deploy button — clone-deploy when a GitHub URL is set, otherwise opens Vercel New. Every production ZIP README includes the same button."
                   />
+
+                  <a
+                    href={deployUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-[#00ff88] text-[#0a0a0f] text-[14px] font-bold hover:opacity-90 transition-opacity"
+                  >
+                    <Rocket size={16} />
+                    {hasRepo ? 'Deploy this repo on Vercel' : 'Open Vercel · Import or upload'}
+                  </a>
+                  <p className="text-[11px] text-[#555] text-center leading-relaxed">
+                    {hasRepo
+                      ? 'Opens the Vercel clone flow for your repo. Next: paste Supabase env vars.'
+                      : 'No repo yet? Push the ZIP, import on Vercel, or paste a GitHub URL below for one-click clone-deploy.'}
+                  </p>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <a
-                      href={SHIP_LINKS.vercelNew}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-2.5 rounded-xl border border-[#00ff88]/30 bg-[#00ff88]/08 px-4 py-3 hover:bg-[#00ff88]/12"
-                    >
-                      <Rocket size={18} className="text-[#00ff88] shrink-0" />
-                      <div>
-                        <div className="text-[13px] font-semibold text-[#00ff88]">
-                          Open Vercel New
-                        </div>
-                        <div className="text-[11px] text-[#00ff88]/60">Import git or upload</div>
-                      </div>
-                    </a>
                     <a
                       href={SHIP_LINKS.githubNew}
                       target="_blank"
@@ -396,14 +405,27 @@ export function ShipPanel({
                         <div className="text-[13px] font-semibold text-[#ccc]">
                           New GitHub repo
                         </div>
-                        <div className="text-[11px] text-[#555]">Optional but recommended</div>
+                        <div className="text-[11px] text-[#555]">Optional · unlocks clone URL</div>
                       </div>
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => void copy(vercelEnvPasteLines(prefs), 'Vercel env vars')}
+                      className="flex items-center gap-2.5 rounded-xl border border-[#1f1f27] px-4 py-3 hover:border-[#00ff88]/35 text-left"
+                    >
+                      <Copy size={16} className="text-[#00ff88] shrink-0" />
+                      <div>
+                        <div className="text-[13px] font-semibold text-[#ccc]">
+                          Copy env for Vercel
+                        </div>
+                        <div className="text-[11px] text-[#555]">Paste into project settings</div>
+                      </div>
+                    </button>
                   </div>
 
                   <label className="block">
                     <span className="text-[11px] font-semibold text-[#666] uppercase tracking-wider">
-                      GitHub repo URL (for deploy button)
+                      GitHub repo URL (unlocks clone-deploy)
                     </span>
                     <input
                       value={prefs.githubRepoUrl}
@@ -413,16 +435,17 @@ export function ShipPanel({
                     />
                   </label>
 
-                  {prefs.githubRepoUrl && (
-                    <a
-                      href={SHIP_LINKS.vercelDeployButton(prefs.githubRepoUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-[#00ff88] text-[#0a0a0f] text-[13px] font-bold"
-                    >
-                      <Rocket size={15} /> Deploy this repo on Vercel
-                    </a>
-                  )}
+                  <label className="block">
+                    <span className="text-[11px] font-semibold text-[#666] uppercase tracking-wider">
+                      Live Vercel URL (optional)
+                    </span>
+                    <input
+                      value={prefs.vercelProjectUrl}
+                      onChange={(e) => update({ vercelProjectUrl: e.target.value })}
+                      placeholder="https://your-app.vercel.app"
+                      className="mt-1.5 w-full bg-[#111116] border border-[#1f1f27] rounded-xl px-3 py-2.5 text-[13px] text-[#e8e8f0] font-mono outline-none focus:border-[#00ff88]/40"
+                    />
+                  </label>
 
                   <CommandList commands={commands.filter((c) => c.label.includes('Vercel') || c.label.includes('Install'))} onCopy={copy} />
 

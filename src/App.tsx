@@ -78,6 +78,12 @@ import {
   shouldRestoreWorkspace,
 } from './lib/session-history'
 import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
+import {
+  clearShareParamFromUrl,
+  decodeSharePayload,
+  importSharePayload,
+  readShareParamFromLocation,
+} from './lib/share-link'
 import { GithubImportPanel } from './components/GithubImportPanel'
 import { listWorkspaces, saveWorkspaceToCloud, upsertWorkspace } from './lib/projects'
 import { BuildProgressChat } from './components/BuildProgressChat'
@@ -1130,6 +1136,30 @@ export default function App() {
   }, [stopVoice])
 
   useEffect(() => {
+    // Share links win over last-session restore (speak → ship → share loop)
+    const shareParam = readShareParamFromLocation()
+    if (shareParam) {
+      const payload = decodeSharePayload(shareParam)
+      if (payload) {
+        const ws = importSharePayload(payload)
+        loadWorkspaceIntoApp(ws, { quiet: true })
+        clearShareParamFromUrl()
+        toast.success(`Opened shared “${ws.name}”`, {
+          description:
+            ws.status === 'built'
+              ? 'Preview restored from share link — refine or ship'
+              : 'Plan restored from share link — keep building',
+          duration: 6000,
+        })
+        setSessionReady(true)
+        return
+      }
+      clearShareParamFromUrl()
+      toast.message('Share link invalid or expired', {
+        description: 'Starting a fresh session instead.',
+      })
+    }
+
     const last = getLastSession()
     if (last && shouldRestoreWorkspace(last)) {
       loadWorkspaceIntoApp(last, { quiet: true })
@@ -2024,8 +2054,10 @@ export default function App() {
             <div className="font-semibold text-[15px] tracking-tight leading-none">
               IdeaSpeak<span className="text-[#00ff88]">.dev</span>
             </div>
-            <div className="text-[11px] text-[#555] mt-0.5 hidden sm:block truncate">
-              {grokLive ? 'Live Grok · plan → build → ship' : 'Plan → build → ship'}
+            <div className="text-[10px] sm:text-[11px] text-[#555] mt-0.5 truncate">
+              {grokLive
+                ? 'Live Grok · Speak → Preview → Ship'
+                : 'Speak → Preview → Ship'}
             </div>
           </div>
           <div className="ml-0.5 sm:ml-1 shrink-0">

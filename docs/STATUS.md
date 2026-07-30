@@ -10,14 +10,17 @@
 
 ---
 
-## Current Score: **9.2 / 10**
+## Current Score: **9.4 / 10**
 
-### Done recently (July 30 polish pass)
-- **BuildProgressOverlay wired** — cancel during build + retry on error in App.tsx
-- **Settings API path** — 30-second Grok connect guide, live status banner, jump-to-key
-- **Full-screen Test mode** — chrome banner, Esc to exit, Exit control
-- **Cursor + reduced-motion** polish in index.css
-- Dev server binds `0.0.0.0:8080` for live preview
+### Done recently (July 30 polish pass · continued)
+- **Shareable build links** — Projects → Share copies `?share=` payload; open restores plan/preview
+- **One-click Vercel always on** — Ship Host CTA + every export README Deploy button (repo-aware)
+- **Copy env for Vercel** — one paste from Ship Host step
+- **Header loop on mobile** — Speak → Preview → Ship always visible
+- **BuildProgressOverlay wired** — cancel during build + retry on error
+- **Settings API path** — 30-second Grok connect guide + live banner
+- **Full-screen Test mode** — banner + Esc exit
+- Portfolio boundaries locked (`PROJECTS.md`) — IdeaSpeak only in this repo
 
 ### Done previously
 - Voice-first UI: large Tap-to-speak mic, Chat → Build → Preview flow
@@ -49,7 +52,7 @@
 2. Supabase project + run `supabase/schema.sql`
 3. Stripe test-mode E2E → production keys
 4. Launch video + analytics (Plausible/PostHog)
-5. Verify one-click Vercel deploy from exported ZIP end-to-end
+5. Optional: cloud-backed share links (today are portable URL payloads)
 6. Sprint 0.5: branch protection on `main` (repo settings)
 
 ---

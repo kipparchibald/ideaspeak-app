@@ -19,6 +19,7 @@ import {
   Check,
   Cloud,
   FolderGit2,
+  Share2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -32,6 +33,7 @@ import {
   type WorkspaceStatus,
 } from '../lib/projects'
 import { isSupabaseConfigured } from '../lib/supabase'
+import { copyShareLink } from '../lib/share-link'
 
 type FilterTab = 'all' | WorkspaceStatus
 
@@ -115,6 +117,20 @@ export function ProjectsLibraryPanel({
     } else toast.error('Could not duplicate project')
   }
 
+  const handleShare = async (ws: SavedWorkspace, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      const { truncated } = await copyShareLink(ws)
+      toast.success('Share link copied', {
+        description: truncated
+          ? 'Plan + chat included (files too large for URL — open on this device for full preview).'
+          : 'Anyone with IdeaSpeak can open this link to remix your plan and preview.',
+      })
+    } catch {
+      toast.error('Could not copy share link')
+    }
+  }
+
   const startRename = (ws: SavedWorkspace, e: React.MouseEvent) => {
     e.stopPropagation()
     setRenamingId(ws.id)
@@ -178,7 +194,7 @@ export function ProjectsLibraryPanel({
                   )}
                 </div>
                 <p className="text-[12px] text-[#666] mt-0.5">
-                  Auto-saved on this device — open any project to pick up where you left off
+                  Auto-saved on this device — share a link, or open any project to resume
                 </p>
               </div>
               <button
@@ -346,6 +362,15 @@ export function ProjectsLibraryPanel({
                             aria-label={`Rename ${ws.name}`}
                           >
                             <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => void handleShare(ws, e)}
+                            className="p-1.5 rounded-lg text-[#555] hover:text-[#00ff88] hover:bg-[#00ff88]/10"
+                            aria-label={`Share ${ws.name}`}
+                            title="Copy shareable link"
+                          >
+                            <Share2 size={14} />
                           </button>
                           <button
                             type="button"

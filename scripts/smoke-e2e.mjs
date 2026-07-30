@@ -314,7 +314,7 @@ await step('POST /api/ship queue + stub poll', async () => {
 })
 
 await step('Unit: production ship scaffold', async () => {
-  const { buildProductionScaffold } = await import('../src/lib/ship.ts')
+  const { buildProductionScaffold, vercelOneClickDeployUrl } = await import('../src/lib/ship.ts')
   const files = buildProductionScaffold({
     appName: 'Smoke App',
     appSlug: 'smoke-app',
@@ -337,12 +337,74 @@ await step('Unit: production ship scaffold', async () => {
     'package.json',
     'supabase/schema.sql',
     'SHIP.md',
+    'vercel.json',
+    'README.md',
     'polish/prompts/cursor.md',
     '.cursorrules',
   ]) {
     if (!files[req]) throw new Error(`missing ${req}`)
   }
-  return `${Object.keys(files).length} files`
+  if (!/Deploy with Vercel/i.test(files['README.md'])) {
+    throw new Error('README missing Deploy with Vercel button')
+  }
+  if (!/"framework"\s*:\s*"nextjs"/.test(files['vercel.json'])) {
+    throw new Error('vercel.json missing nextjs framework')
+  }
+  const bare = vercelOneClickDeployUrl('')
+  if (bare !== 'https://vercel.com/new') throw new Error(`bare deploy URL ${bare}`)
+  const withRepo = vercelOneClickDeployUrl('https://github.com/acme/app')
+  if (!withRepo.includes('repository-url=') || !withRepo.includes('github.com')) {
+    throw new Error(`repo deploy URL bad: ${withRepo}`)
+  }
+  return `${Object.keys(files).length} files · deploy button ok`
+})
+
+await step('Unit: shareable build link encode/decode', async () => {
+  const {
+    encodeSharePayload,
+    decodeSharePayload,
+    workspaceToSharePayload,
+    importSharePayload,
+  } = await import('../src/lib/share-link.ts')
+
+  const mockWs = {
+    id: 'ws-smoke',
+    name: 'Share Smoke',
+    summary: 'Voice-built habit tracker',
+    status: 'built',
+    mode: 'build',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    conversation: [
+      { id: '1', role: 'user', content: 'build a habit tracker' },
+      { id: '2', role: 'assistant', content: 'Great — daily check-ins and streaks.' },
+    ],
+    transcript: 'user: build a habit tracker',
+    buildPlan: null,
+    currentProject: {
+      id: 'p1',
+      name: 'Share Smoke',
+      brief: { vision: 'habits' },
+      optimizedPrompt: 'habit tracker',
+      files: {
+        'src/App.tsx': { code: 'export default function App(){return <div>ok</div>}' },
+      },
+      transcript: 'habit tracker',
+    },
+    selectedPersonality: 'grok',
+    proactiveSuggestions: [],
+    planReady: true,
+    lastBuildPlan: 'habit tracker v1',
+  }
+
+  // Avoid writing to real localStorage during node unit — encode path only
+  const payload = workspaceToSharePayload(mockWs)
+  const encoded = encodeSharePayload(payload)
+  const decoded = decodeSharePayload(encoded)
+  if (!decoded || decoded.name !== 'Share Smoke') throw new Error('decode name mismatch')
+  if (!decoded.files?.['src/App.tsx']) throw new Error('files not round-tripped')
+  if (decoded.conversation.length < 1) throw new Error('conversation missing')
+  return `share payload ${encoded.length} chars`
 })
 
 // ── UI (single browser, shared session, retries) ───────────────────────────

@@ -157,6 +157,21 @@ export const SHIP_LINKS = {
   },
 }
 
+/** Canonical one-click deploy URL — always valid even without a GitHub repo */
+export function vercelOneClickDeployUrl(repoUrl?: string | null): string {
+  const url = (repoUrl || '').trim()
+  return url ? SHIP_LINKS.vercelDeployButton(url) : SHIP_LINKS.vercelNew
+}
+
+/** Env vars to paste into Vercel project settings */
+export function vercelEnvPasteLines(prefs: ShipPreferences): string {
+  const { supabase } = prefs
+  return [
+    `NEXT_PUBLIC_SUPABASE_URL=${supabase.url || 'https://YOUR_PROJECT.supabase.co'}`,
+    `NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabase.anonKey || 'your-anon-key'}`,
+  ].join('\n')
+}
+
 export function extractSupabaseRef(url: string): string {
   try {
     const m = url.match(/https?:\/\/([a-z0-9-]+)\.supabase\.co/i)
@@ -859,13 +874,20 @@ You already have this ZIP — production Next.js + Supabase stubs + Vercel confi
 4. **SQL Editor** → paste \`supabase/schema.sql\` → Run
 5. Auth → URL config: add \`http://localhost:3000\` and your Vercel URL
 
-## 3. Host (Vercel)
+## 3. Host (Vercel) — one-click
+
+1. Push this folder to GitHub (optional) **or** use the CLI below.
+2. Click **Deploy with Vercel** in the README, or open:
+   - With repo: \`https://vercel.com/new/clone?repository-url=YOUR_REPO\`
+   - Without: https://vercel.com/new
+3. Paste env vars from \`.env.local\` into Vercel → Project → Settings → Environment Variables.
+
+CLI:
 \`\`\`bash
 bun install   # or npm install
-npx vercel
-# or: push to GitHub → vercel.com/new → Import
+npx vercel --yes
+npx vercel --prod --yes
 \`\`\`
-Add the same env vars in Vercel → Project → Settings → Environment Variables.
 
 ## 4. Domain
 Vercel → Project → Settings → Domains → add \`${prefs.customDomain || 'yourdomain.com'}\`
@@ -885,9 +907,11 @@ No mystery steps. If something fails, re-open IdeaSpeak Ship and re-copy the che
 }
 
 function buildReadme(appName: string, appSlug: string, prefs: ShipPreferences): string {
-  const deploy = prefs.githubRepoUrl
-    ? `[![Deploy with Vercel](https://vercel.com/button)](${SHIP_LINKS.vercelDeployButton(prefs.githubRepoUrl)})`
-    : `Deploy: push to GitHub → [vercel.com/new](https://vercel.com/new) or \`npx vercel\``
+  // Always ship a one-click Deploy button — repo-aware when GitHub URL is known
+  const deployUrl = prefs.githubRepoUrl
+    ? SHIP_LINKS.vercelDeployButton(prefs.githubRepoUrl)
+    : SHIP_LINKS.vercelNew
+  const deploy = `[![Deploy with Vercel](https://vercel.com/button)](${deployUrl})`
 
   return `# ${appName}
 
