@@ -14,6 +14,7 @@
 
 ### Done recently (July 30 full ship pass)
 - **Grok Build** — `/api/build` uses `grok-build-0.1` via Responses API (+ `grok-4.5` fallback); UI + progress surface Grok Build
+- **Grok 4.5** — default chat/plan/discuss model (flagship); pairs with Grok Build for previews
 - **Confidential Box** — encrypted one-time vault; Autopilot deploys via Vercel/GitHub APIs without dashboards
 - **Export quality** — secret-free ZIP, merged preview deps, smarter imports, EXPORT_QUALITY.md, client directive only when needed
 - **Gallery** — Publish from Projects, Share on gallery cards, remix analytics

@@ -31,7 +31,7 @@ try {
 
 const XAI_API = 'https://api.x.ai/v1/chat/completions'
 const XAI_REALTIME_SECRETS = 'https://api.x.ai/v1/realtime/client_secrets'
-const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-3'
+const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-4.5'
 const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-build-0.1'
 
 type FeatureFlags = {

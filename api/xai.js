@@ -3,8 +3,12 @@
 import { jsonrepair } from 'jsonrepair'
 
 export const MODELS = {
-  // Prefer fast chat models that accept max_tokens cleanly
-  chat: process.env.XAI_CHAT_MODEL || 'grok-3',
+  /**
+   * Dual-model stack (xAI flagship + coding agent):
+   * - chat: Grok 4.5 — plan, discuss, voice co-founder, refine
+   * - build: grok-build-0.1 — live preview code (Grok Build); falls back to 4.5
+   */
+  chat: process.env.XAI_CHAT_MODEL || 'grok-4.5',
   /** Grok Build coding model (agentic SE) — override with XAI_BUILD_MODEL */
   build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
 }

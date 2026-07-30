@@ -73,6 +73,7 @@ export function buildLocalEnvSnippet(missing: string[]): string {
   ]
   if (missing.includes('XAI_API_KEY')) {
     lines.push('XAI_API_KEY=xai-your-key-here')
+    lines.push('# XAI_CHAT_MODEL=grok-4.5')
     lines.push('# XAI_BUILD_MODEL=grok-build-0.1')
 
   }
@@ -120,12 +121,12 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
   const items: CapabilityItem[] = [
     {
       id: 'grok',
-      label: 'Grok API (plan + build)',
+      label: 'Grok 4.5 + Grok Build',
       status: grokLive ? 'ready' : hasClientKey ? 'partial' : 'missing',
       detail: grokLive
         ? `${grok.message}${grok.model ? ` · ${grok.model}` : ''}`
         : 'Set XAI_API_KEY on Vercel/Railway or paste key in Settings',
-      unlocks: 'Live chat, Grok Build previews, refine, TTS, image',
+      unlocks: 'Grok 4.5 plan/chat · Grok Build previews · refine · TTS · image',
 
       envVars: ['XAI_API_KEY'],
       links: [
