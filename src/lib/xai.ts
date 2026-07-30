@@ -97,7 +97,15 @@ export async function generateWithLLM(
   brief: any,
   apiKey?: string,
   personality: string = 'grok'
-): Promise<{ files: any; name: string; plan: string; raw: string }> {
+): Promise<{
+  files: any
+  name: string
+  plan: string
+  raw: string
+  model?: string
+  engine?: string
+  api?: string
+}> {
   const key = apiKey || localStorage.getItem('ideaspeak_xai_key');
   if (!key) throw new Error('NO_KEY');
 
@@ -111,21 +119,30 @@ export async function generateWithLLM(
       body: JSON.stringify({ transcript, brief, personality }),
     });
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `Build failed (${res.status})`);
+    }
 
     if (data.parsed && data.parsed.files) {
       return {
         files: data.parsed.files,
         name: data.parsed.name || 'IdeaSpeak App',
         plan: data.parsed.plan || 'LLM generated',
-        raw: data.content
+        raw: data.content,
+        model: data.model || 'grok-build-0.1',
+        engine: data.engine || 'grok-build',
+        api: data.api,
       };
     }
-    throw new Error('No structured files from LLM');
+    throw new Error('No structured files from Grok Build');
   } catch (e) {
-    console.error('LLM build failed', e);
+    console.error('Grok Build failed', e);
     throw e;
   }
 }
+
+/** Default build model label for UI when status not yet loaded */
+export const GROK_BUILD_MODEL_LABEL = 'grok-build-0.1'
 
 export type DiscussResult = {
   content: string

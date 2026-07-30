@@ -46,9 +46,11 @@ export default async function handler(req) {
       live: true,
       source: 'server',
       model: MODELS.chat,
+      buildModel: MODELS.build,
+      engine: 'grok-build',
       message: hasServerApiKey()
-        ? 'Grok API ready — key hosted securely on server'
-        : 'Grok API ready via dev proxy',
+        ? 'Grok API ready — builds use Grok Build (' + MODELS.build + ')'
+        : 'Grok API ready via dev proxy — builds use Grok Build (' + MODELS.build + ')',
     }),
     { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
   )

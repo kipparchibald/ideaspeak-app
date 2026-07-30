@@ -973,7 +973,8 @@ export default function App() {
     setMobilePanel('app')
     setIsBuilding(true)
     setBuildProgress({
-      headline: 'Grok 4.5 is building your live preview…',
+      headline: 'Grok Build is building your live preview…',
+
       phase: 'working',
       log: [
         {
@@ -1294,7 +1295,7 @@ export default function App() {
       let source: 'grok' | 'local' = 'local'
       let name = String(brief.vision || idea).split(/[.!\n]/)[0].slice(0, 48).trim() || 'Your app'
 
-      const buildModel = 'grok-4.5'
+      const buildModel = 'grok-build-0.1'
       const progress = beginBuildProgress(
         'plan',
         {
@@ -1377,9 +1378,12 @@ export default function App() {
         setWorkspaceTab('preview')
 
         if (key) {
-          progress.note(`${buildModel} is building your live preview…`, 'Builder')
+          progress.note(`Grok Build (${buildModel}) is generating your live preview…`, 'Builder')
           const llmResult = await Promise.race([
-            generateWithLLM(idea, brief, key, personality),
+            generateWithLLM(idea, brief, key, personality).then((r) => {
+              if (r.model) progress.note(`Grok Build · ${r.model} (${r.api || 'api'})`, 'Builder')
+              return r
+            }),
             new Promise<null>((r) => setTimeout(() => r(null), 90_000)),
           ])
           if (isCancelled()) {
@@ -1397,7 +1401,8 @@ export default function App() {
                 llmResult.name || name,
                 builtPlan,
                 'grok',
-                `${llmResult.name || name} · ${buildModel}`,
+                `${llmResult.name || name} · Grok Build · ${llmResult.model || buildModel}`,
+
                 true,
               )
               return { plan: builtPlan, name: llmResult.name || name, source: 'grok' as const }

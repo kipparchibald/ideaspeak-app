@@ -13,12 +13,16 @@ interface ModeBadgeProps {
 }
 
 export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) {
+  const liveTitle =
+    'Live xAI · chat + Grok Build (grok-build-0.1) for production preview code'
+
   const resolved: GrokMode =
     mode ?? (hasApiKey ? 'live' : 'simulator')
 
   if (resolved === 'live') {
     return (
       <span
+        title={liveTitle}
         style={{
           fontSize: compact ? 10 : 11,
           background: 'rgba(0,255,136,.12)',
@@ -43,6 +47,9 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
           }}
         />
         Real Grok
+        {!compact && (
+          <span style={{ opacity: 0.75, fontWeight: 600 }}>· Build</span>
+        )}
       </span>
     )
   }

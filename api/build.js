@@ -1,8 +1,9 @@
 import { BUILD_SYSTEM } from './build-prompt.js'
-import { buildModelRequestBody, getApiKey, MODELS, parseJsonFromContent } from './xai.js'
+import { getApiKey, parseJsonFromContent } from './xai.js'
+import { callGrokBuild, GROK_BUILD_MODEL } from './grok-build.js'
 import { corsHeaders, isAllowedOrigin, rejectRateLimitedNode } from './security.js'
 
-/** Node runtime — Grok 4.5 build can take 60–90s; Edge times out */
+/** Node runtime — Grok Build can take 60–120s; Edge times out */
 export const config = { maxDuration: 120 }
 
 export default async function handler(req, res) {
@@ -39,37 +40,49 @@ export default async function handler(req, res) {
     : `Build production v1 from this discussion/plan:\n${transcript || ''}`
 
   const personalityNote =
-    personality === 'witty' ? ' Witty code comments.' :
-    personality === 'mentor' ? ' Wise mentor tone in copy.' :
-    personality === 'coach' ? ' Energetic motivational UI copy.' :
-    personality === 'rebel' ? ' Bold unconventional UI choices.' : ''
+    personality === 'witty'
+      ? ' Witty code comments.'
+      : personality === 'mentor'
+        ? ' Wise mentor tone in copy.'
+        : personality === 'coach'
+          ? ' Energetic motivational UI copy.'
+          : personality === 'rebel'
+            ? ' Bold unconventional UI choices.'
+            : ''
 
   try {
-    const upstream = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(
-        buildModelRequestBody({
-          messages: [
-            { role: 'system', content: BUILD_SYSTEM + personalityNote },
-            { role: 'user', content: user },
-          ],
-          maxTokens: 8000,
-          temperature: 0.55,
-        }),
-      ),
+    const { content, model, api } = await callGrokBuild(apiKey, {
+      system: BUILD_SYSTEM + personalityNote,
+      user,
+      maxTokens: 12000,
+      temperature: 0.4,
     })
 
-    const data = await upstream.json()
-    if (!upstream.ok) {
-      const err = data?.error?.message || data?.error || 'xAI error'
-      return res.status(500).json({ error: err })
+    let parsed = parseJsonFromContent(content)
+    if (parsed?.files && typeof parsed.files === 'object') {
+      // Ensure entry always present for Sandpack
+      if (!parsed.files['src/main.tsx']) {
+        parsed = {
+          ...parsed,
+          files: {
+            ...parsed.files,
+            'src/main.tsx':
+              parsed.files['src/main.tsx'] ||
+              `import { StrictMode } from 'react'\nimport { createRoot } from 'react-dom/client'\nimport App from './App'\nimport './index.css'\ncreateRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)`,
+          },
+        }
+      }
     }
 
-    const content = data.choices?.[0]?.message?.content || ''
-    const parsed = parseJsonFromContent(content)
-    return res.status(200).json({ content, parsed, model: MODELS.build })
+    return res.status(200).json({
+      content,
+      parsed,
+      model,
+      api,
+      engine: 'grok-build',
+      defaultModel: GROK_BUILD_MODEL,
+    })
   } catch (e) {
-    return res.status(500).json({ error: e?.message || 'Build failed' })
+    return res.status(500).json({ error: e?.message || 'Grok Build failed' })
   }
 }

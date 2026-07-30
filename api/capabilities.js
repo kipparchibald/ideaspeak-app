@@ -38,6 +38,11 @@ export default async function handler(req) {
         chat: MODELS.chat,
         build: MODELS.build,
       },
+      features: {
+        grokBuild: true,
+        buildEngine: 'grok-build',
+        buildModel: MODELS.build,
+      },
     }),
     { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } },
   )

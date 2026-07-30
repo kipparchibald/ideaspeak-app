@@ -12,7 +12,8 @@
 |----------|-------|--------|---------|-----------|-------|
 | `XAI_API_KEY` | `.env.local` | Production env | ✅ | **Yes** (Real Grok) | Platform demo key; never expose to browser |
 | `XAI_CHAT_MODEL` | optional | optional | optional | No | Default `grok-3` |
-| `XAI_BUILD_MODEL` | optional | optional | optional | No | Default `grok-build-0.1` |
+| `XAI_BUILD_MODEL` | optional | optional | optional | No | Default `grok-build-0.1` (Grok Build coding model) |
+| `XAI_BUILD_FALLBACK` | optional | optional | optional | No | Default `grok-4.5` if build model fails |
 | `VITE_API_BASE` | empty | empty | — | No | Empty = same-origin `/api/*` on Vercel; set to Railway URL when edge can't handle a route |
 | `PORT` | `3001` (default) | — | Railway sets | No | Bun server listen port |
 | `E2B_API_KEY` | `.env.local` | — | ✅ | No | Real sandbox (Sprint 3); stub today |

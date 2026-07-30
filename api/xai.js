@@ -5,18 +5,20 @@ import { jsonrepair } from 'jsonrepair'
 export const MODELS = {
   // Prefer fast chat models that accept max_tokens cleanly
   chat: process.env.XAI_CHAT_MODEL || 'grok-3',
-  build: process.env.XAI_BUILD_MODEL || 'grok-4.5',
+  /** Grok Build coding model (agentic SE) — override with XAI_BUILD_MODEL */
+  build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
 }
 
-/** Chat Completions body for IdeaSpeak build — grok-4.x uses low reasoning for speed */
-export function buildModelRequestBody({ messages, maxTokens = 8000, temperature = 0.55 }) {
+/** Chat Completions body for IdeaSpeak build (fallback path when Responses API unavailable) */
+export function buildModelRequestBody({ messages, maxTokens = 12000, temperature = 0.4 }) {
   const body = {
     model: MODELS.build,
     messages,
     max_tokens: maxTokens,
     temperature,
   }
-  if (String(MODELS.build).includes('grok-4')) {
+  // Only grok-4.x chat models accept reasoning_effort — grok-build-0.1 does not
+  if (String(MODELS.build).includes('grok-4') && !String(MODELS.build).includes('build')) {
     body.reasoning_effort = 'low'
   }
   return body

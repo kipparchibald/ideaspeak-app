@@ -73,7 +73,8 @@ export function buildLocalEnvSnippet(missing: string[]): string {
   ]
   if (missing.includes('XAI_API_KEY')) {
     lines.push('XAI_API_KEY=xai-your-key-here')
-    lines.push('# XAI_BUILD_MODEL=grok-4.5')
+    lines.push('# XAI_BUILD_MODEL=grok-build-0.1')
+
   }
   if (missing.includes('E2B_API_KEY')) {
     lines.push('')
@@ -124,7 +125,8 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
       detail: grokLive
         ? `${grok.message}${grok.model ? ` · ${grok.model}` : ''}`
         : 'Set XAI_API_KEY on Vercel/Railway or paste key in Settings',
-      unlocks: 'Live chat, Grok 4.5 build, refine, TTS, image',
+      unlocks: 'Live chat, Grok Build previews, refine, TTS, image',
+
       envVars: ['XAI_API_KEY'],
       links: [
         { label: 'xAI console', href: 'https://console.x.ai/' },
@@ -143,12 +145,12 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
     },
     {
       id: 'build',
-      label: 'Grok 4.5 live preview build',
+      label: 'Grok Build live preview',
       status: grokLive ? 'ready' : 'missing',
       detail: grokLive
-        ? `Build model: ${server?.models?.build || 'grok-4.5'}`
+        ? `Grok Build model: ${server?.models?.build || 'grok-build-0.1'} (Responses API)`
         : 'Without API key → local template scaffold only',
-      unlocks: 'AI-generated preview (not template swap)',
+      unlocks: 'AI-generated preview via Grok Build (not template swap)',
       envVars: ['XAI_API_KEY', 'XAI_BUILD_MODEL'],
     },
     {

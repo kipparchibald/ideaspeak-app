@@ -32,7 +32,7 @@ try {
 const XAI_API = 'https://api.x.ai/v1/chat/completions'
 const XAI_REALTIME_SECRETS = 'https://api.x.ai/v1/realtime/client_secrets'
 const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-3'
-const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-4.5'
+const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-build-0.1'
 
 type FeatureFlags = {
   xai: boolean
@@ -186,6 +186,7 @@ const server = serve({
             vercelDeploy: !!process.env.VERCEL_TOKEN?.trim(),
           },
           models: { chat: CHAT_MODEL, build: BUILD_MODEL },
+          features: { grokBuild: true, buildEngine: 'grok-build' },
           features,
         },
         { headers },
@@ -421,28 +422,42 @@ const server = serve({
                   ? ' Bold unconventional UI choices.'
                   : ''
         const user = inputBrief
-          ? `Build production v1 from this plan and brief:\n${transcript || ''}\n\nBrief: ${JSON.stringify(inputBrief)}`
-          : `Build production v1 from this discussion/plan:\n${transcript || ''}`
-        const content = await callXaiProxy(
-          [{ role: 'system', content: BUILD_SYSTEM + personalityNote }, { role: 'user', content: user }],
-          apiKey,
-          BUILD_MODEL,
-          { temperature: 0.55, maxTokens: 8000, reasoningEffort: 'low' },
-        )
-        let parsed = parseJsonFromContent(content)
+          ? `Build production v1 from this plan and brief:
+${transcript || ''}
+
+Brief: ${JSON.stringify(inputBrief)}`
+          : `Build production v1 from this discussion/plan:
+${transcript || ''}`
+        const { callGrokBuild } = await import('../api/grok-build.js')
+        const result = await callGrokBuild(apiKey, {
+          system: BUILD_SYSTEM + personalityNote,
+          user,
+          maxTokens: 12000,
+          temperature: 0.4,
+        })
+        let parsed = parseJsonFromContent(result.content)
         if (parsed?.files && typeof parsed.files === 'object') {
           parsed = {
             ...parsed,
             files: { ...parsed.files, 'src/main.tsx': PREVIEW_ENTRY_MAIN },
           }
         }
-        return Response.json({ content, parsed }, { headers })
+        return Response.json(
+          {
+            content: result.content,
+            parsed,
+            model: result.model,
+            api: result.api,
+            engine: 'grok-build',
+          },
+          { headers },
+        )
       } catch (e: any) {
         return Response.json({ error: e.message }, { status: 500, headers })
       }
     }
 
-    if (url.pathname === '/api/discuss' && req.method === 'POST') {
+    if (url.pathname === '/api/discuss && req.method === 'POST') {
       if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
       try {
         const { messages, image, personality = 'grok', voiceMode } = await req.json()
