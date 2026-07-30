@@ -2,7 +2,16 @@
 
 This is the IdeaSpeak xAI voice-first builder project.
 
-**Separate product:** SummitForge RE OS lives in `/Users/kipp/SummitForge-RE-OS` (or its own git remote). Do not merge features, status docs, demos, or code from SummitForge into this repo. IdeaSpeak is a general voice-to-app builder — not a real-estate OS.
+**Separate products (never merge into this repo):**
+| Product | Repo |
+|---------|------|
+| IdeaSpeak (this) | `ideaspeak-app` |
+| SummitForge RE OS | `SummitForge-RE-OS` |
+| Split Rock Construction | `split-rock-construction` |
+
+See **`PROJECTS.md`** for the full portfolio map and agent rules.
+
+**Do not** merge features, status docs, demos, brands, or code from SummitForge or Split Rock into IdeaSpeak. IdeaSpeak is a general voice-to-app builder — not a real-estate OS and not a construction company site.
 
 Follow the principles in:
 - prompts/IdeaSpeak-xAI-Agent-System-Prompt.md
@@ -17,3 +26,5 @@ Follow the principles in:
 - When editing export logic (src/App.tsx + buildNextJsScaffold), keep both ZIP and GitHub paths in sync and enrich with context files.
 
 See README-IDEASPEAK.md and the plan doc for architecture.
+
+If `AGENTS.project.md` exists in this workspace, it contains the user's project instructions; follow it with the same priority as this file.

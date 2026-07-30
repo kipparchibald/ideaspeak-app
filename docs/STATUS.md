@@ -54,13 +54,13 @@
 
 ---
 
-## Boundaries
+## Boundaries (three big products — never jumble)
 
-| | IdeaSpeak | SummitForge |
-|--|-----------|-------------|
-| Purpose | Build *any* app by voice with Grok | RE operating system (land, deals, brokerage) |
-| Repo | `ideaspeak-app` | `SummitForge-RE-OS` |
-| Stack | Vite + React + Sandpack + xAI proxy | Next.js 15 RE dashboard |
-| Work here? | Yes | No — open that repo |
+| | IdeaSpeak | SummitForge | Split Rock Construction |
+|--|-----------|-------------|-------------------------|
+| Purpose | Build *any* app by voice with Grok | RE operating system (land, deals, brokerage) | New-home builds website + client portal |
+| Repo | `ideaspeak-app` | `SummitForge-RE-OS` | `split-rock-construction` |
+| Stack | Vite + React + Sandpack + xAI proxy | Next.js RE dashboard | Construction marketing / portal |
+| Work in this checkout? | **Yes only** | No — own repo | No — own repo |
 
-When an agent or human is in this workspace, only change IdeaSpeak.
+Full map: root **`PROJECTS.md`**. When an agent or human is in this workspace, only change IdeaSpeak.
