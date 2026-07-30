@@ -27,3 +27,4 @@ dist-ssr
 .preview-runtime
 .env*
 config/in-house-setup.local
+package-lock.json

@@ -382,8 +382,13 @@ function SettingsModal({
             exit={{ scale: 0.98, opacity: 0 }}
             className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1f1f27] bg-[#111116] p-6 shadow-2xl"
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">Settings</h2>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">Settings</h2>
+                <p className="text-[12px] text-[#555] mt-0.5">
+                  Connect Grok · verify · badge flips to Real Grok
+                </p>
+              </div>
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-[#666] hover:text-[#ccc] hover:bg-white/5 transition-colors"
@@ -391,6 +396,14 @@ function SettingsModal({
               >
                 <X size={18} />
               </button>
+            </div>
+
+            <div className="mb-5 rounded-xl border border-[#00ff88]/20 bg-[#00ff88]/06 px-3 py-2.5">
+              <p className="text-[11px] text-[#888] leading-relaxed">
+                <span className="text-[#00ff88] font-semibold">Demo works without a key</span>
+                {' '}(Simulator). For Real Grok on self-host, paste a key below and Save & Verify.
+                Hosted IdeaSpeak uses platform Grok automatically.
+              </p>
             </div>
 
             <ApiSetupPanel onKeySaved={onKeySaved} />
@@ -967,10 +980,14 @@ export default function App() {
 
   useEffect(() => () => voicePairRef.current?.dispose(), [])
 
-  // Esc closes topmost modal / stops mic
+  // Esc: exit full-screen test mode, then topmost modal / stop mic
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (previewFullscreen) {
+        setPreviewFullscreen(false)
+        return
+      }
       if (showPricing) setShowPricing(false)
       else if (showAutopilot) setShowAutopilot(false)
       else if (showCouncil) setShowCouncil(false)
@@ -978,6 +995,7 @@ export default function App() {
       else if (showGallery) setShowGallery(false)
       else if (showPolish) setShowPolish(false)
       else if (showShip) setShowShip(false)
+      else if (showProjects) setShowProjects(false)
       else if (showSettings) setShowSettings(false)
       else if (voicePairOpen) stopVoicePair()
       else if (voiceActiveRef.current || voiceStatus === 'prompting') stopVoice()
@@ -985,6 +1003,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [
+    previewFullscreen,
     showPricing,
     showAutopilot,
     showCouncil,
@@ -992,6 +1011,7 @@ export default function App() {
     showGallery,
     showPolish,
     showShip,
+    showProjects,
     showSettings,
     voicePairOpen,
     stopVoice,
@@ -1906,8 +1926,12 @@ export default function App() {
     <div className="h-dvh flex flex-col bg-[#0a0a0f] text-[#e8e8f0] overflow-hidden font-sans antialiased">
       <Toaster theme="dark" position="top-center" richColors closeButton />
 
-      {/* ── Header ── */}
-      <header className="h-14 shrink-0 border-b border-[#1f1f27] flex items-center justify-between gap-3 px-3 sm:px-4">
+      {/* ── Header (hidden in full-screen test mode) ── */}
+      <header
+        className={`h-14 shrink-0 border-b border-[#1f1f27] items-center justify-between gap-3 px-3 sm:px-4 ${
+          previewFullscreen ? 'hidden' : 'flex'
+        }`}
+      >
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-[#00ff88] flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(0,255,136,0.25)]">
             <Mic size={15} color="#0a0a0f" strokeWidth={2.5} />
@@ -1916,8 +1940,8 @@ export default function App() {
             <div className="font-semibold text-[15px] tracking-tight leading-none">
               IdeaSpeak<span className="text-[#00ff88]">.dev</span>
             </div>
-            <div className="text-[11px] text-[#555] mt-0.5 hidden sm:block truncate">
-              {grokLive ? 'Live Grok · plan → build → ship' : 'Plan → build → ship'}
+            <div className="text-[11px] text-[#555] mt-0.5 truncate max-w-[9.5rem] sm:max-w-none">
+              Speak → preview → ship
             </div>
           </div>
           <div className="ml-0.5 sm:ml-1 shrink-0">
@@ -2053,7 +2077,7 @@ export default function App() {
       </header>
 
       {/* Grok connection banner */}
-      {!grokLive && !hideSimBanner && (
+      {!grokLive && !hideSimBanner && !previewFullscreen && (
         <div className="shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 bg-[#fa0]/08 border-b border-[#fa0]/15">
           <button
             onClick={() => setShowSettings(true)}
@@ -2131,12 +2155,32 @@ export default function App() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-3.5 scroll-smooth">
             {showEmptyHints && (
-              <div className="text-center px-2 pt-2 pb-4 space-y-2">
+              <div className="text-center px-2 pt-2 pb-4 space-y-3">
                 <h1 className="text-[22px] sm:text-[26px] font-bold tracking-tight text-[#e8e8f0] leading-tight">
                   Speak your app into existence.
                 </h1>
                 <p className="text-[13px] sm:text-[14px] text-[#666] leading-relaxed max-w-sm mx-auto">
-                  Grok plans it with you. You see it live. Ship to Vercel when it&apos;s real.
+                  Grok plans with you. You see a live preview. Ship a production ZIP when it's
+                  real.
+                </p>
+                <div className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] text-[#555] flex-wrap pt-1">
+                  {(
+                    [
+                      { n: '1', label: 'Speak' },
+                      { n: '2', label: 'Preview' },
+                      { n: '3', label: 'Ship' },
+                    ] as const
+                  ).map((s, i, arr) => (
+                    <span key={s.label} className="inline-flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#00ff88]/10 text-[#00ff88] font-semibold">
+                        {s.n} · {s.label}
+                      </span>
+                      {i < arr.length - 1 && <ArrowRight size={10} className="text-[#333]" />}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[11px] text-[#444] max-w-xs mx-auto">
+                  Tap the mic or type an idea — no setup required to try the full loop.
                 </p>
               </div>
             )}
@@ -2532,9 +2576,27 @@ export default function App() {
                   : 'flex'
             }`}
           >
-            <div className="h-12 shrink-0 border-b border-[#1f1f27] flex items-center justify-between px-3 gap-2">
+            <div
+              className={`shrink-0 border-b border-[#1f1f27] flex items-center justify-between px-3 gap-2 ${
+                previewFullscreen
+                  ? 'h-11 bg-[#0a0a0f]/95 backdrop-blur-md absolute top-0 left-0 right-0 z-40 border-b-[#00ff88]/20'
+                  : 'h-12 relative'
+              }`}
+            >
               <div className="flex items-center gap-2 min-w-0">
-                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-[#111116] border border-[#1f1f27]">
+                {previewFullscreen && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#00ff88]/12 border border-[#00ff88]/35 text-[#00ff88] shrink-0">
+                    Test mode
+                    <span className="hidden sm:inline font-medium normal-case tracking-normal opacity-80">
+                      · Esc to exit
+                    </span>
+                  </span>
+                )}
+                <div
+                  className={`flex items-center gap-1 p-0.5 rounded-lg bg-[#111116] border border-[#1f1f27] ${
+                    previewFullscreen ? 'hidden sm:flex' : ''
+                  }`}
+                >
                   {(
                     [
                       { id: 'preview' as WorkspaceTab, label: 'Preview', icon: Eye },
@@ -2630,10 +2692,12 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => (voicePairOpen ? stopVoicePair() : void startVoicePair())}
-                  className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[12px] transition-colors ${
-                    voicePairOpen
-                      ? 'border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
-                      : 'border-[#1f1f27] text-[#777] hover:text-[#ccc] hover:border-[#333]'
+                  className={`items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[12px] transition-colors ${
+                    previewFullscreen
+                      ? 'hidden'
+                      : voicePairOpen
+                        ? 'inline-flex border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
+                        : 'inline-flex border-[#1f1f27] text-[#777] hover:text-[#ccc] hover:border-[#333]'
                   }`}
                   title="Voice pair build — talk while agent codes"
                 >
@@ -2644,7 +2708,9 @@ export default function App() {
                   type="button"
                   onClick={openManualEdit}
                   disabled={!hasBuilt}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[12px] transition-colors disabled:opacity-40 border-[#00ff88]/30 bg-[#00ff88]/08 text-[#00ff88] hover:bg-[#00ff88]/12 disabled:border-[#1f1f27] disabled:bg-transparent disabled:text-[#777]"
+                  className={`items-center gap-1 h-8 px-2.5 rounded-lg border text-[12px] transition-colors disabled:opacity-40 border-[#00ff88]/30 bg-[#00ff88]/08 text-[#00ff88] hover:bg-[#00ff88]/12 disabled:border-[#1f1f27] disabled:bg-transparent disabled:text-[#777] ${
+                    previewFullscreen ? 'hidden' : 'inline-flex'
+                  }`}
                   title="Manual edit — source + live preview"
                 >
                   <PencilLine size={12} />
@@ -2656,14 +2722,18 @@ export default function App() {
                     void navigator.clipboard.writeText(main)
                     toast.success('Copied App.tsx')
                   }}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#777] hover:text-[#ccc] hover:border-[#333] transition-colors"
+                  className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#777] hover:text-[#ccc] hover:border-[#333] transition-colors ${
+                    previewFullscreen ? 'hidden' : ''
+                  }`}
                 >
                   <Copy size={12} />
                   <span className="hidden sm:inline">Copy</span>
                 </button>
                 <button
                   onClick={() => void exportPreviewZip()}
-                  className="hidden sm:inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#777] hover:text-[#ccc] hover:border-[#333] transition-colors"
+                  className={`hidden sm:inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#777] hover:text-[#ccc] hover:border-[#333] transition-colors ${
+                    previewFullscreen ? '!hidden' : ''
+                  }`}
                   title="Preview sources only"
                 >
                   <Download size={12} />
@@ -2685,16 +2755,24 @@ export default function App() {
                       ? 'border-[#00ff88]/40 bg-[#00ff88]/10 text-[#00ff88]'
                       : 'border-[#1f1f27] text-[#777] hover:text-[#ccc] hover:border-[#333]'
                   }`}
-                  title={previewFullscreen ? 'Exit full-screen test mode' : 'Full-screen preview test mode'}
+                  title={
+                    previewFullscreen
+                      ? 'Exit full-screen test mode (Esc)'
+                      : 'Full-screen Test mode — try the app without chat chrome'
+                  }
                   aria-pressed={previewFullscreen}
                 >
                   {previewFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                  <span className="hidden sm:inline">{previewFullscreen ? 'Exit' : 'Test'}</span>
+                  <span className={previewFullscreen ? 'inline' : 'hidden sm:inline'}>
+                    {previewFullscreen ? 'Exit' : 'Test'}
+                  </span>
                 </button>
                 <button
                   onClick={() => setShowVision(true)}
                   disabled={!hasBuilt}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors"
+                  className={`items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors ${
+                    previewFullscreen ? 'hidden' : 'hidden lg:inline-flex'
+                  }`}
                   title="Upload a screenshot — Grok vision matches your live preview"
                 >
                   <ScanEye size={13} />
@@ -2703,7 +2781,9 @@ export default function App() {
                 <button
                   onClick={() => setShowPolish(true)}
                   disabled={!hasBuilt}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors"
+                  className={`items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 disabled:opacity-40 transition-colors ${
+                    previewFullscreen ? 'hidden' : 'hidden lg:inline-flex'
+                  }`}
                   title="Polish with Cursor / Grok / Claude / GPT"
                 >
                   <Wand2 size={13} />
@@ -2712,7 +2792,9 @@ export default function App() {
                 <button
                   onClick={() => setShowCouncil(true)}
                   disabled={!hasBuilt}
-                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#38bdf8] hover:border-[#38bdf8]/35 disabled:opacity-40 transition-colors"
+                  className={`items-center gap-1 h-8 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#38bdf8] hover:border-[#38bdf8]/35 disabled:opacity-40 transition-colors ${
+                    previewFullscreen ? 'hidden' : 'hidden lg:inline-flex'
+                  }`}
                   title="Council launch review — Grok, Claude, Cursor, GPT"
                 >
                   <Users size={13} />
@@ -2745,7 +2827,11 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 relative bg-[#06060a]">
+            <div
+              className={`flex-1 min-h-0 relative bg-[#06060a] ${
+                previewFullscreen ? 'pt-11' : ''
+              }`}
+            >
               {voicePairOpen && (
                 <div className="absolute bottom-3 left-3 right-3 z-30 sm:left-auto sm:right-3 sm:max-w-[340px] pointer-events-auto">
                   <VoicePairPanel

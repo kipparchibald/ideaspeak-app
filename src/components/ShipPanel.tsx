@@ -36,6 +36,7 @@ import {
   type ShipPreferences,
   type ShipStepId,
 } from '../lib/ship'
+import { IN_HOUSE_PLATFORM, PLATFORM_COPY } from '../lib/platform'
 
 const STEP_ICONS: Record<ShipStepId, typeof Package> = {
   package: Package,
@@ -159,7 +160,9 @@ export function ShipPanel({
                         Ship
                       </h2>
                       <p className="text-[12px] text-[#666]">
-                        Kill the pain · package → backend → host → domain → launch
+                        {IN_HOUSE_PLATFORM
+                          ? PLATFORM_COPY.shipSub
+                          : 'Kill the pain · package → backend → host → domain → launch'}
                       </p>
                     </div>
                   </div>
@@ -220,6 +223,13 @@ export function ShipPanel({
                 </div>
               )}
 
+              {IN_HOUSE_PLATFORM && (
+                <div className="rounded-xl border border-[#7dd3fc]/30 bg-[#7dd3fc]/08 px-3 py-2.5 text-[12px] text-[#9ec9e0] leading-relaxed">
+                  <span className="font-semibold text-[#7dd3fc]">What works now:</span>{' '}
+                  {PLATFORM_COPY.shipHonestPath}
+                </div>
+              )}
+
               {step === 'package' && (
                 <section className="space-y-4">
                   <StepIntro
@@ -252,7 +262,7 @@ export function ShipPanel({
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#00ff88] text-[#0a0a0f] text-[14px] font-bold hover:opacity-90 disabled:opacity-40 transition-opacity"
                   >
                     <Download size={16} />
-                    {downloading ? 'Packaging…' : 'Download production ZIP'}
+                    {downloading ? 'Packaging…' : IN_HOUSE_PLATFORM ? PLATFORM_COPY.zipPrimaryCta : 'Download production ZIP'}
                   </button>
                   <p className="text-[11px] text-[#555] text-center leading-relaxed">
                     ZIP includes <span className="text-[#888]">polish/prompts</span> for Cursor,
