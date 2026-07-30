@@ -102,34 +102,83 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
         </div>
         <div>
           <h3 className="text-[15px] font-semibold text-[#e8e8f0]">
-            {IN_HOUSE_PLATFORM ? PLATFORM_COPY.grokHeadline : 'API Connections'}
+            {IN_HOUSE_PLATFORM ? PLATFORM_COPY.grokHeadline : 'Connect Grok'}
           </h3>
           <p className="text-[12px] text-[#666] mt-0.5 leading-relaxed">
             {IN_HOUSE_PLATFORM
               ? PLATFORM_COPY.grokSub
-              : 'Set the key once — it stays on this device (or on the server).'}
+              : 'One path to Real Grok. Simulator still demos Speak → Preview → Ship without a key.'}
           </p>
         </div>
       </div>
 
+      <ol className="rounded-xl border border-[#1f1f27] bg-[#111116] px-3.5 py-3 space-y-2 list-none">
+        <li className="flex gap-2.5 text-[11px] leading-relaxed">
+          <span className="shrink-0 w-5 h-5 rounded-md bg-[#00ff88]/12 border border-[#00ff88]/30 text-[#00ff88] text-[10px] font-bold flex items-center justify-center">
+            1
+          </span>
+          <span className="text-[#888]">
+            {IN_HOUSE_PLATFORM ? (
+              <>
+                Hosted demo uses platform Grok automatically. Header badge should say{' '}
+                <span className="text-[#00ff88] font-semibold">Real Grok</span>.
+              </>
+            ) : (
+              <>
+                Get a free key at{' '}
+                <a
+                  href="https://console.x.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#00ff88] hover:underline"
+                >
+                  console.x.ai
+                </a>
+                .
+              </>
+            )}
+          </span>
+        </li>
+        <li className="flex gap-2.5 text-[11px] leading-relaxed">
+          <span className="shrink-0 w-5 h-5 rounded-md bg-[#00ff88]/12 border border-[#00ff88]/30 text-[#00ff88] text-[10px] font-bold flex items-center justify-center">
+            2
+          </span>
+          <span className="text-[#888]">
+            {IN_HOUSE_PLATFORM ? (
+              <>Optional: paste your own key below only for local overrides.</>
+            ) : (
+              <>
+                Paste below → <span className="text-[#e8e8f0] font-semibold">Save & Verify</span>{' '}
+                — key stays on this device only.
+              </>
+            )}
+          </span>
+        </li>
+        <li className="flex gap-2.5 text-[11px] leading-relaxed">
+          <span className="shrink-0 w-5 h-5 rounded-md bg-[#00ff88]/12 border border-[#00ff88]/30 text-[#00ff88] text-[10px] font-bold flex items-center justify-center">
+            3
+          </span>
+          <span className="text-[#888]">
+            Badge flips to <span className="text-[#00ff88] font-semibold">Real Grok</span>. Without a
+            key you still get the full Simulator demo.
+          </span>
+        </li>
+      </ol>
+
       {IN_HOUSE_PLATFORM ? (
         <div className="rounded-xl border border-[#00ff88]/25 bg-[#00ff88]/06 px-3 py-2.5">
           <p className="text-[11px] text-[#888] leading-relaxed">
-            Grok, ship, sandbox, and polish run on IdeaSpeak infrastructure (Vercel + Railway +
-            Supabase). You do not need personal API keys for the hosted app.
+            Grok, preview, and polish run on IdeaSpeak infrastructure. No personal API keys needed
+            for the hosted app. Ship uses production ZIP today; auto-deploy goes live when the
+            platform worker is connected.
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border border-[#1f1f27] bg-[#111116] px-3 py-2.5 space-y-1.5">
-          <p className="text-[11px] font-semibold text-[#888]">Never re-type — pick one path</p>
+        <div className="rounded-xl border border-[#1f1f27] bg-[#0a0a0f] px-3 py-2.5 space-y-1.5">
+          <p className="text-[11px] font-semibold text-[#888]">Self-host tip</p>
           <p className="text-[11px] text-[#666] leading-relaxed">
-            <span className="text-[#00ff88]">Best:</span> put{' '}
-            <code className="text-[#888]">XAI_API_KEY</code> in Vercel env — everyone uses Grok with
-            no paste.
-          </p>
-          <p className="text-[11px] text-[#666] leading-relaxed">
-            <span className="text-[#00ff88]">Or:</span> Save &amp; Verify below — stored in
-            localStorage on this device.
+            <span className="text-[#00ff88]">Best:</span> set{' '}
+            <code className="text-[#888]">XAI_API_KEY</code> in Vercel / Railway — no browser paste.
           </p>
         </div>
       )}
@@ -139,7 +188,9 @@ export function ApiSetupPanel({ onKeySaved }: ApiSetupPanelProps) {
           <div className="flex items-center gap-2">
             <Zap size={15} className="text-[#00ff88]" />
             <span className="text-[13px] font-semibold text-[#e8e8f0]">xAI Grok</span>
-            <span className="text-[10px] uppercase tracking-wider text-[#555] font-medium">Required</span>
+            <span className="text-[10px] uppercase tracking-wider text-[#555] font-medium">
+              {IN_HOUSE_PLATFORM ? 'Hosted' : 'For Real Grok'}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-[12px]">
             {statusIcon()}

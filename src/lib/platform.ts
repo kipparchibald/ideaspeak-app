@@ -7,9 +7,15 @@
 export const IN_HOUSE_PLATFORM = true
 
 export const PLATFORM_COPY = {
-  shipHeadline: 'IdeaSpeak ships for you',
+  shipHeadline: 'Ship when you are ready',
   shipSub:
-    'We provision GitHub, Vercel, Supabase, and env on our platform — you get a live URL.',
+    'Download a production ZIP now, or queue auto-deploy when the platform worker is live. No secrets to paste.',
   grokHeadline: 'Platform Grok',
-  grokSub: 'Live on IdeaSpeak infrastructure — no API key required.',
+  grokSub: 'Live on IdeaSpeak infrastructure — no API key required for the hosted demo.',
+  /** Honest path while auto-deploy worker is still provisioning */
+  shipHonestPath:
+    'Production ZIP works today. One-click GitHub + Vercel auto-deploy goes live once the platform worker is connected.',
+  zipPrimaryCta: 'Download production ZIP (works now)',
+  launchWhenStub:
+    'Queued for auto-deploy. Your reliable path right now is Ship → Download production ZIP, then open in Cursor or push to GitHub.',
 } as const

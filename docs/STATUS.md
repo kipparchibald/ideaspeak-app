@@ -6,13 +6,15 @@
 
 **Not this product:** SummitForge RE OS is a separate real-estate app in its own repo (`SummitForge-RE-OS`). Do not mix code, status, or scope.
 
-**Last updated:** July 14, 2026
+**Last updated:** July 30, 2026
 
 ---
 
-## Current Score: **9.0 / 10**
+## Current Score: **9.2 / 10**
+
 
 ### Done recently
+- **Deploy polish (July 30):** honest Ship/Launch copy when worker is stub; Settings 3-step Grok path; full-screen Test mode (Esc, minimal chrome); mobile toolbar cleanup; ModeBadge opens Settings
 - Voice-first UI: large Tap-to-speak mic, Chat → Build → Preview flow
 - Preview | Code workspace tabs (preview-first)
 - ModeBadge (Simulator vs Real Grok)

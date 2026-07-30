@@ -30,7 +30,7 @@ const TIER_STYLES: Record<
   },
   provisioning: {
     dot: 'bg-[#fa0]',
-    label: 'Provisioning',
+    label: 'ZIP ready',
     border: 'border-[#fa0]/35',
     bg: 'bg-[#fa0]/10',
     text: 'text-[#fa0]',
@@ -97,7 +97,7 @@ export function PlatformReadinessChip({
   const title = activeDeploy
     ? 'Deploy in progress — open Launch to see timeline'
     : readiness
-      ? `${readiness.headline}. ${readiness.detail}`
+      ? `${readiness.headline}. ${readiness.detail} ${readiness.actionHint}`
       : 'Checking IdeaSpeak platform status'
 
   const clickable = hasBuilt && onOpenLaunch

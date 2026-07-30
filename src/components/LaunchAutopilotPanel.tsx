@@ -211,11 +211,8 @@ export function LaunchAutopilotPanel({
         saveAutopilotState({ repoUrl: final.repoUrl, lastSlug: prefs.appSlug })
       }
 
-      const targetUrl = fabricLiveUrl(prefs.appSlug)
-      if (final.liveUrl) {
+      if (final.liveUrl && !stubMode) {
         handleLiveUrl(final.liveUrl)
-      } else if (stubMode && IN_HOUSE_PLATFORM) {
-        handleLiveUrl(targetUrl)
       }
 
       setExpanded(LaunchStep.done)
@@ -223,6 +220,8 @@ export function LaunchAutopilotPanel({
       if (stubMode) {
         const copy = provisioningLaunchCopy(prefs.appSlug)
         setDeployChangelog(copy.changelog)
+        // Honest: provisional fabric URL is not a live production deploy yet
+        setLiveUrl('')
         savePersistedShipJob({
           jobId: final.id,
           appSlug: prefs.appSlug,
@@ -231,11 +230,11 @@ export function LaunchAutopilotPanel({
           stub: true,
           events: final.events,
           deployChangelog: copy.changelog,
-          liveUrl: targetUrl,
+          liveUrl: undefined,
           repoUrl: final.repoUrl ?? undefined,
         })
         toast.message(copy.toastTitle, { description: copy.toastDetail })
-        void speak(copy.changelog, { provider: 'auto' }).catch(() => null)
+        void speak(PLATFORM_COPY.launchWhenStub, { provider: 'auto' }).catch(() => null)
       } else {
         const changelog = formatShipChangelog(final.events)
         const summary = getLastDeployChange(final.events) || changelog
@@ -579,10 +578,15 @@ export function LaunchAutopilotPanel({
               )}
 
               {IN_HOUSE_PLATFORM ? (
-                <p className="mt-3 text-[11px] text-[#7dd3fc]/90">
-                  Target URL:{' '}
-                  <span className="font-mono text-[#aaa]">{fabricLiveUrl(prefs.appSlug)}</span>
-                </p>
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-[11px] text-[#7dd3fc]/90">
+                    Planned URL (when auto-deploy is live):{' '}
+                    <span className="font-mono text-[#aaa]">{fabricLiveUrl(prefs.appSlug)}</span>
+                  </p>
+                  <p className="text-[11px] text-[#666] leading-relaxed">
+                    {PLATFORM_COPY.launchWhenStub}
+                  </p>
+                </div>
               ) : (
                 <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
                   <input
@@ -633,7 +637,7 @@ export function LaunchAutopilotPanel({
                   {isActiveShipJob(persistedJob)
                     ? 'Deploy still in progress — reopening will resume polling.'
                     : persistedJob.stub
-                      ? provisioningLaunchCopy(prefs.appSlug).changelog
+                      ? PLATFORM_COPY.launchWhenStub
                       : 'Previous launch saved — run Launch again to ship a fresh build.'}
                 </div>
               )}
