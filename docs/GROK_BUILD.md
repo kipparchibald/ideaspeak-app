@@ -1,35 +1,41 @@
-# Grok Build on IdeaSpeak
+# Grok Build on IdeaSpeak — model strategy
 
-IdeaSpeak uses **xAI Grok Build** for production preview generation.
+## Decision: best for building **and** economics
 
-## Dual-model stack
+| Role | Model | $/1M in · out | Why |
+|------|--------|---------------|-----|
+| **Build (primary)** | **`grok-build-0.1`** | ~$1 · $2 | Purpose-built for app scaffolding; high-output JSON files cost ~**3× less** than 4.5 |
+| **Build (fallback)** | `grok-4.5` | ~$2 · $6 | Only if build model errors |
+| **Plan / chat / refine** | **`grok-4.5`** | ~$2 · $6 | Flagship reasoning; turns are short so absolute $ stays low |
 
-| Role | Model | Used for |
-|------|--------|----------|
-| **Chat / plan** | **Grok 4.5** | Voice co-founder, discuss, refine, vision notes |
-| **Build** | **grok-build-0.1** | Live Sandpack preview file generation |
-| **Build fallback** | **Grok 4.5** | If `grok-build-0.1` is unavailable |
+### Why not 4.5 for every build?
+xAI’s Grok Build **CLI** may default to 4.5 for interactive agent sessions. IdeaSpeak’s `/api/build` is different: one-shot **large code JSON** (8–12k output tokens). On that shape, **grok-build-0.1 wins on cost** while staying the specialist coding model.
 
-xAI positions Grok 4.5 as the flagship for code *and* everything else; Grok Build 0.1 is the specialized agentic coding model that powers the Grok Build CLI. IdeaSpeak uses both: 4.5 for thinking with you, Build for generating the app.
+Rough cost per full preview codegen (12k out, small in):
+- `grok-build-0.1` ≈ **$0.02–0.03**
+- `grok-4.5` ≈ **$0.05–0.07**
 
-## Model
-| Env | Default | Role |
-|-----|---------|------|
-| `XAI_BUILD_MODEL` | `grok-build-0.1` | Primary coding model (Grok Build CLI class) |
-| `XAI_BUILD_FALLBACK` | `grok-4.5` | Fallback if build model unavailable |
-| `XAI_CHAT_MODEL` | `grok-4.5` | Plan / discuss / refine |
+### Env overrides
+```bash
+XAI_CHAT_MODEL=grok-4.5
+XAI_BUILD_MODEL=grok-build-0.1
+XAI_BUILD_FALLBACK=grok-4.5
+```
+
+Source of truth: `api/model-strategy.js`
 
 ## API path
-1. `POST /api/build` (Vercel Node 120s or Railway Bun)
-2. Prefer `POST https://api.x.ai/v1/responses` with `instructions` + `input`
-3. Fallback: `POST /v1/chat/completions` with same model
-4. Parse JSON file map → Sandpack / local preview
+1. `POST /api/build`
+2. Prefer `POST https://api.x.ai/v1/responses` with `grok-build-0.1`
+3. Fallback: same model on chat completions, then `grok-4.5`
+4. Parse JSON → Sandpack / local preview
 
 ## Client
-- `generateWithLLM()` returns `{ files, name, plan, model, engine, api }`
-- Build progress overlay shows **Grok Build · model · api**
-- Mode badge: **Real Grok · Build** when live
+- `generateWithLLM()` → `{ files, name, plan, model, engine, api }`
+- Progress: **Grok Build · model**
+- Live badge: **Real Grok · Build**
 
-## Docs
+## Refs
 - https://docs.x.ai/build/overview
 - https://x.ai/news/grok-build-0-1
+- https://x.ai/news/grok-4-5

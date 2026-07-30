@@ -49,8 +49,8 @@ export default async function handler(req) {
       buildModel: MODELS.build,
       engine: 'grok-build',
       message: hasServerApiKey()
-        ? 'Grok API ready — builds use Grok Build (' + MODELS.build + ')'
-        : 'Grok API ready via dev proxy — builds use Grok Build (' + MODELS.build + ')',
+        ? 'Ready — plan with ' + MODELS.chat + ', build with ' + MODELS.build + ' (best $/quality)'
+        : 'Dev ready — plan with ' + MODELS.chat + ', build with ' + MODELS.build + ' (best $/quality)',
     }),
     { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
   )

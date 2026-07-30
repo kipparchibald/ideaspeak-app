@@ -14,7 +14,7 @@ interface ModeBadgeProps {
 
 export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) {
   const liveTitle =
-    'Live xAI · Grok 4.5 (plan/chat) + Grok Build grok-build-0.1 (preview code)'
+    'Plan: Grok 4.5 · Build: grok-build-0.1 (~3× cheaper codegen than 4.5, purpose-built)'
 
   const resolved: GrokMode =
     mode ?? (hasApiKey ? 'live' : 'simulator')
@@ -48,7 +48,7 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
         />
         Real Grok
         {!compact && (
-          <span style={{ opacity: 0.75, fontWeight: 600 }}>· 4.5 + Build</span>
+          <span style={{ opacity: 0.75, fontWeight: 600 }}>· Build</span>
         )}
       </span>
     )

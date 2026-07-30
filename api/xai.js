@@ -4,12 +4,12 @@ import { jsonrepair } from 'jsonrepair'
 
 export const MODELS = {
   /**
-   * Dual-model stack (xAI flagship + coding agent):
-   * - chat: Grok 4.5 — plan, discuss, voice co-founder, refine
-   * - build: grok-build-0.1 — live preview code (Grok Build); falls back to 4.5
+   * Economics + quality (see api/model-strategy.js):
+   * - chat  → grok-4.5        short turns, flagship plan quality
+   * - build → grok-build-0.1  specialist codegen, ~3× cheaper than 4.5 on scaffolds
+   * - fallback build → grok-4.5 only if build model unavailable
    */
   chat: process.env.XAI_CHAT_MODEL || 'grok-4.5',
-  /** Grok Build coding model (agentic SE) — override with XAI_BUILD_MODEL */
   build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
 }
 

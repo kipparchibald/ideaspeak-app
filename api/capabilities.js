@@ -1,4 +1,5 @@
 import { hasServerApiKey, MODELS } from './xai.js'
+import { MODEL_STRATEGY } from './model-strategy.js'
 import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge' }
@@ -42,6 +43,13 @@ export default async function handler(req) {
         grokBuild: true,
         buildEngine: 'grok-build',
         buildModel: MODELS.build,
+        modelStrategy: MODEL_STRATEGY.rationale,
+      },
+      strategy: {
+        chat: MODEL_STRATEGY.chat.model,
+        build: MODEL_STRATEGY.build.model,
+        buildFallback: MODEL_STRATEGY.buildFallback.model,
+        why: MODEL_STRATEGY.economics.primaryBuildCostVs45,
       },
     }),
     { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } },

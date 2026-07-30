@@ -121,7 +121,7 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
   const items: CapabilityItem[] = [
     {
       id: 'grok',
-      label: 'Grok 4.5 + Grok Build',
+      label: 'Grok stack (4.5 plan · Build codegen)',
       status: grokLive ? 'ready' : hasClientKey ? 'partial' : 'missing',
       detail: grokLive
         ? `${grok.message}${grok.model ? ` · ${grok.model}` : ''}`
@@ -149,7 +149,7 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
       label: 'Grok Build live preview',
       status: grokLive ? 'ready' : 'missing',
       detail: grokLive
-        ? `Grok Build model: ${server?.models?.build || 'grok-build-0.1'} (Responses API)`
+        ? `Grok Build ${server?.models?.build || 'grok-build-0.1'} · best $/quality (~3× cheaper than 4.5 on scaffolds)`
         : 'Without API key → local template scaffold only',
       unlocks: 'AI-generated preview via Grok Build (not template swap)',
       envVars: ['XAI_API_KEY', 'XAI_BUILD_MODEL'],
