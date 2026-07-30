@@ -3,7 +3,7 @@
 **Goal:** Make IdeaSpeak the best "build and test in one app" experience — speak an idea, see a live preview, refine by voice, ship.
 
 **Live Demo:** https://ideaspeak-app.vercel.app  
-**Last updated:** July 14, 2026
+**Last updated:** July 30, 2026
 
 ---
 
@@ -35,12 +35,12 @@
 ### Still missing / needs polish
 - [x] Landing page / hero clearly communicates **"Speak → Live Preview → Ship"** (`App.tsx` hero + step cues; header tagline still legacy on `sm+`)
 - [x] ModeBadge visible on mobile (`ModeBadge` always in header; only subtitle tagline hides on small screens)
-- [ ] Settings modal: crystal-clear path for adding xAI API key + graceful fallback messaging (panel exists; copy/UX pass needed)
+- [x] Settings modal: crystal-clear path for adding xAI API key + graceful fallback messaging (30s guide + live banner)
 - [x] Error states and loading states feel premium (`BuildProgressOverlay` — cancel during build, retry on error)
 - [x] Export (ZIP + GitHub) produces clean, runnable Next.js 15 projects **every time** (`buildProductionScaffold` + `smoke-e2e` ship unit test)
 - [ ] One-click Vercel deploy button **verified** end-to-end in exported projects
 - [x] TypeScript clean build — `tsc -b && vite build` (no `|| true` mask)
-- [ ] Full-screen live preview / "Test mode"
+- [x] Full-screen live preview / "Test mode" (banner + Esc exit)
 
 ## Phase 2 — Production Hardening
 
@@ -66,14 +66,14 @@
 
 ---
 
-## Current Score: **8.2 / 10** (Demo-ready, loop is the product)
+## Current Score: **9.2 / 10** (Demo-ready, loop is the product)
 
 **Next highest leverage items:**
-1. Make the landing experience scream "Speak → Live Preview → Ship"
-2. Surface ModeBadge on all breakpoints
-3. Perfect the Settings → API key flow copy
-4. Ensure exported projects always build cleanly (`bun install && bun dev`)
-5. Keep CI green on every PR (`bun run build` + `bun run smoke:local`)
+1. Verify one-click Vercel deploy button end-to-end on exported projects
+2. Deploy Railway + Supabase + Stripe test keys for production path
+3. Ensure exported projects always build cleanly (`bun install && bun dev`)
+4. Keep CI green on every PR (`bun run build` + `bun run smoke:local`)
+5. Launch video + analytics funnel
 
 See also:
 - `docs/DEMO_NOTES.md` — 30-second demo script

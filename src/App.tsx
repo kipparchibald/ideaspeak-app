@@ -81,6 +81,7 @@ import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
 import { GithubImportPanel } from './components/GithubImportPanel'
 import { listWorkspaces, saveWorkspaceToCloud, upsertWorkspace } from './lib/projects'
 import { BuildProgressChat } from './components/BuildProgressChat'
+import { BuildProgressOverlay } from './components/BuildProgressOverlay'
 import {
   beginBuildProgress,
   endBuildProgress,
@@ -356,6 +357,7 @@ function SettingsModal({
   setTtsEnabled,
   onKeySaved,
   onOpenGithubImport,
+  grokLive,
 }: {
   open: boolean
   onClose: () => void
@@ -365,7 +367,13 @@ function SettingsModal({
   setTtsEnabled: (v: boolean) => void
   onKeySaved: (hasKey: boolean) => void
   onOpenGithubImport?: () => void
+  grokLive?: boolean
 }) {
+  const apiSectionRef = useRef<HTMLDivElement>(null)
+  const scrollToApi = () => {
+    apiSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <AnimatePresence>
       {open && (
@@ -382,8 +390,13 @@ function SettingsModal({
             exit={{ scale: 0.98, opacity: 0 }}
             className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1f1f27] bg-[#111116] p-6 shadow-2xl"
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">Settings</h2>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-[17px] font-semibold tracking-tight text-[#e8e8f0]">Settings</h2>
+                <p className="text-[12px] text-[#555] mt-0.5">
+                  Connect Grok · finish setup · ship path
+                </p>
+              </div>
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-[#666] hover:text-[#ccc] hover:bg-white/5 transition-colors"
@@ -393,11 +406,65 @@ function SettingsModal({
               </button>
             </div>
 
-            <ApiSetupPanel onKeySaved={onKeySaved} />
+            {!grokLive && (
+              <div className="mb-5 rounded-xl border border-[#00ff88]/25 bg-[#00ff88]/06 px-3.5 py-3">
+                <p className="text-[12px] font-semibold text-[#00ff88] mb-1">
+                  Get live Grok in 30 seconds
+                </p>
+                <ol className="text-[11px] text-[#888] space-y-1 list-decimal list-inside leading-relaxed">
+                  <li>
+                    Open{' '}
+                    <a
+                      href="https://console.x.ai"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#00ff88] underline underline-offset-2"
+                    >
+                      console.x.ai
+                    </a>{' '}
+                    → create an API key
+                  </li>
+                  <li>
+                    Paste below → <strong className="text-[#ccc]">Save & Verify</strong>
+                  </li>
+                  <li>
+                    Mode badge turns <strong className="text-[#00ff88]">Real Grok</strong> — voice
+                    & build go live
+                  </li>
+                </ol>
+                <p className="text-[10px] text-[#555] mt-2 leading-relaxed">
+                  No key yet? IdeaSpeak still demos with the high-fidelity simulator — every button
+                  works.
+                </p>
+                <button
+                  type="button"
+                  onClick={scrollToApi}
+                  className="mt-2.5 text-[11px] font-semibold text-[#00ff88] hover:underline"
+                >
+                  Jump to API key →
+                </button>
+              </div>
+            )}
+
+            {grokLive && (
+              <div className="mb-5 rounded-xl border border-[#00ff88]/30 bg-[#00ff88]/08 px-3.5 py-2.5 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse shrink-0" />
+                <p className="text-[12px] text-[#00ff88] font-medium">
+                  Grok is live — voice co-founder and builds use real models.
+                </p>
+              </div>
+            )}
+
+            <div ref={apiSectionRef} id="settings-api">
+              <ApiSetupPanel onKeySaved={onKeySaved} />
+            </div>
 
             <div className="h-px bg-[#1f1f27] my-6" />
 
-            <FinishSetupPanel onOpenGithubImport={onOpenGithubImport} />
+            <FinishSetupPanel
+              onOpenGithubImport={onOpenGithubImport}
+              onOpenSettings={scrollToApi}
+            />
 
             <div className="h-px bg-[#1f1f27] my-6" />
 
@@ -716,6 +783,10 @@ export default function App() {
   const voiceBuildScheduledRef = useRef(false)
   const voiceBuildTimerRef = useRef<number | null>(null)
   const buildInFlightRef = useRef(false)
+  /** Bumped to cancel an in-flight materializeApp (overlay Cancel) */
+  const buildGenerationRef = useRef(0)
+  /** Last idea brief for overlay Retry */
+  const lastBuildBriefRef = useRef<{ idea: string; history: ChatMessage[] } | null>(null)
   /** Keep realtime Grok Voice alive through handoff → build */
   const voiceBuildHandoffRef = useRef(false)
 
@@ -979,6 +1050,7 @@ export default function App() {
       else if (showPolish) setShowPolish(false)
       else if (showShip) setShowShip(false)
       else if (showSettings) setShowSettings(false)
+      else if (previewFullscreen) setPreviewFullscreen(false)
       else if (voicePairOpen) stopVoicePair()
       else if (voiceActiveRef.current || voiceStatus === 'prompting') stopVoice()
     }
@@ -993,6 +1065,7 @@ export default function App() {
     showPolish,
     showShip,
     showSettings,
+    previewFullscreen,
     voicePairOpen,
     stopVoice,
     stopVoicePair,
@@ -1131,6 +1204,9 @@ export default function App() {
         }
       }
       buildInFlightRef.current = true
+      const gen = ++buildGenerationRef.current
+      lastBuildBriefRef.current = { idea, history }
+      const isCancelled = () => gen !== buildGenerationRef.current
 
       const gate = canUse('build')
       if (!gate.ok) {
@@ -1177,6 +1253,13 @@ export default function App() {
       progress.logBuildRequest()
       progress.startTicker()
 
+      if (isCancelled()) {
+        progress.dispose()
+        buildInFlightRef.current = false
+        setIsBuilding(false)
+        throw new Error('BUILD_CANCELLED')
+      }
+
       const persistBuilt = (merged: Record<string, string>, builtName: string, builtPlan: string) => {
         void persistAndSyncSnapshot({
           workspaceId: activeWorkspaceId,
@@ -1201,6 +1284,9 @@ export default function App() {
         toastDetail: string,
         usedGrok: boolean,
       ) => {
+        if (isCancelled()) {
+          throw new Error('BUILD_CANCELLED')
+        }
         const merged = mergeProjectFiles(files)
         name = builtName
         plan = builtPlan
@@ -1239,6 +1325,10 @@ export default function App() {
             generateWithLLM(idea, brief, key, personality),
             new Promise<null>((r) => setTimeout(() => r(null), 90_000)),
           ])
+          if (isCancelled()) {
+            progress.dispose()
+            throw new Error('BUILD_CANCELLED')
+          }
           if (llmResult?.files && Object.keys(llmResult.files).length > 0) {
             const candidate = mergeProjectFiles(
               toSandpackFiles(llmResult.files as GeneratedFiles),
@@ -1280,6 +1370,17 @@ export default function App() {
 
         return { plan, name: themed.name || name, source }
       } catch (e) {
+        if (e instanceof Error && e.message === 'BUILD_CANCELLED') {
+          setIsBuilding(false)
+          setIsUpgrading(false)
+          buildInFlightRef.current = false
+          // Overlay Cancel already showed error UI + toast when user clicked Cancel
+          return {
+            plan: lastBuildPlan || 'Build cancelled.',
+            name: lastBuiltName || 'Your app',
+            source: 'local' as const,
+          }
+        }
         console.error(e)
         const fallback = buildWorldClassPreview({
           vision: idea,
@@ -1296,11 +1397,16 @@ export default function App() {
         toast.success('Live preview ready')
         return { plan, name: fallback.name, source: 'local' as const }
       } finally {
+        const wasCancelled = gen !== buildGenerationRef.current
         buildInFlightRef.current = false
         setIsBuilding(false)
         setIsUpgrading(false)
-        endBuildProgress()
-        window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
+        if (wasCancelled) {
+          // Leave error-phase UI for Retry on overlay
+        } else {
+          endBuildProgress()
+          window.setTimeout(() => setBuildProgress(EMPTY_BUILD_PROGRESS), 4000)
+        }
       }
     },
     [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],
@@ -1455,7 +1561,9 @@ export default function App() {
           buildInFlightRef.current = false
           voiceBuildHandoffRef.current = false
         }
-        if (err instanceof Error && err.message === 'PLAN_LIMIT') {
+        if (err instanceof Error && err.message === 'BUILD_CANCELLED') {
+          // overlay already toasted
+        } else if (err instanceof Error && err.message === 'PLAN_LIMIT') {
           // already toasted + pricing opened
         } else {
           setMessages((prev) => [
@@ -2532,6 +2640,27 @@ export default function App() {
                   : 'flex'
             }`}
           >
+            {previewFullscreen && (
+              <div className="shrink-0 h-9 px-3 flex items-center justify-between gap-3 border-b border-[#00ff88]/25 bg-[#00ff88]/08">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#00ff88]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-pulse" />
+                    Test mode
+                  </span>
+                  <span className="text-[11px] text-[#888] truncate hidden sm:inline">
+                    Full-screen live preview · Esc or Exit to return
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFullscreen(false)}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-[#00ff88]/35 bg-[#0a0a0f] text-[11px] font-semibold text-[#00ff88] hover:bg-[#00ff88]/10"
+                >
+                  <Minimize2 size={12} />
+                  Exit
+                </button>
+              </div>
+            )}
             <div className="h-12 shrink-0 border-b border-[#1f1f27] flex items-center justify-between px-3 gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="flex items-center gap-1 p-0.5 rounded-lg bg-[#111116] border border-[#1f1f27]">
@@ -2838,6 +2967,38 @@ export default function App() {
         )}
       </div>
 
+      <BuildProgressOverlay
+        visible={
+          isBuilding ||
+          isUpgrading ||
+          buildProgress.phase === 'error'
+        }
+        progress={buildProgress}
+        onCancel={() => {
+          if (!isBuilding && !isUpgrading && !buildInFlightRef.current) return
+          buildGenerationRef.current += 1
+          buildInFlightRef.current = false
+          setIsBuilding(false)
+          setIsUpgrading(false)
+          setIsLoading(false)
+          endBuildProgress()
+          const session = beginBuildProgress('plan', { projectName: 'Cancelled' }, setBuildProgress)
+          void session.fail('Build cancelled by you')
+          toast.message('Build cancelled')
+        }}
+        onRetry={() => {
+          const brief = lastBuildBriefRef.current
+          if (brief) {
+            setBuildProgress(EMPTY_BUILD_PROGRESS)
+            void materializeApp(brief.idea, brief.history).catch(() => {
+              /* materializeApp handles toasts */
+            })
+            return
+          }
+          void sendMessage('build it', 'build', { force: true })
+        }}
+      />
+
       <SettingsModal
         open={showSettings}
         onClose={() => setShowSettings(false)}
@@ -2845,6 +3006,7 @@ export default function App() {
         setPersonality={setPersonality}
         ttsEnabled={ttsEnabled}
         setTtsEnabled={setTtsEnabled}
+        grokLive={grokLive}
         onKeySaved={(hasKey) => {
           const k = loadKey()
           setApiKey(k)

@@ -6,13 +6,20 @@
 
 **Not this product:** SummitForge RE OS is a separate real-estate app in its own repo (`SummitForge-RE-OS`). Do not mix code, status, or scope.
 
-**Last updated:** July 14, 2026
+**Last updated:** July 30, 2026
 
 ---
 
-## Current Score: **9.0 / 10**
+## Current Score: **9.2 / 10**
 
-### Done recently
+### Done recently (July 30 polish pass)
+- **BuildProgressOverlay wired** — cancel during build + retry on error in App.tsx
+- **Settings API path** — 30-second Grok connect guide, live status banner, jump-to-key
+- **Full-screen Test mode** — chrome banner, Esc to exit, Exit control
+- **Cursor + reduced-motion** polish in index.css
+- Dev server binds `0.0.0.0:8080` for live preview
+
+### Done previously
 - Voice-first UI: large Tap-to-speak mic, Chat → Build → Preview flow
 - Preview | Code workspace tabs (preview-first)
 - ModeBadge (Simulator vs Real Grok)
@@ -38,12 +45,12 @@
 | 6 Launch | ⏳ Analytics, legal, demo video |
 
 ### Next (Sprint 6 + hardening)
-1. Wire `BuildProgressOverlay` cancel/retry in App.tsx
-2. Deploy Railway with `XAI_API_KEY` + `E2B_API_KEY` + `STRIPE_*`
-3. Supabase project + run `supabase/schema.sql`
-4. Stripe test-mode E2E → production keys
-5. Launch video + analytics (Plausible/PostHog)
-5. Sprint 0.5: branch protection on `main` (repo settings)
+1. Deploy Railway with `XAI_API_KEY` + `E2B_API_KEY` + `STRIPE_*`
+2. Supabase project + run `supabase/schema.sql`
+3. Stripe test-mode E2E → production keys
+4. Launch video + analytics (Plausible/PostHog)
+5. Verify one-click Vercel deploy from exported ZIP end-to-end
+6. Sprint 0.5: branch protection on `main` (repo settings)
 
 ---
 

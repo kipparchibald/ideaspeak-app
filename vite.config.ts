@@ -16,6 +16,9 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
+    port: 8080,
+    strictPort: true,
     // Local preview writes to .preview-runtime/ — don't let that invalidate the shell's deps
     watch: {
       ignored: ['**/.preview-runtime/**'],
@@ -34,6 +37,11 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/preview/, ''),
       },
     },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 8080,
+    strictPort: true,
   },
   define: {
     // Expose API base URL — empty string = same origin (works on Vercel with serverless fns)
