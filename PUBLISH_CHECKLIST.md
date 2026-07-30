@@ -62,11 +62,12 @@
 - [x] Shareable build links (`?share=` encode/decode + Projects Share button)
 - [x] Demo panel with 30s loop script (+ optional video embed via env)
 - [x] Analytics funnel helper (local ring + Plausible/PostHog optional)
+- [x] Confidential Box vault + autonomous client ship (GitHub + Vercel API)
 - [ ] Error tracking (Sentry) + status page
 
 ---
 
-## Current Score: **9.6 / 10** (Demo-ready, loop is the product)
+## Current Score: **9.7 / 10** (Demo-ready, loop is the product)
 
 **Next highest leverage items:**
 1. Deploy Railway + Supabase + Stripe test keys for production path

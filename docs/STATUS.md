@@ -10,9 +10,10 @@
 
 ---
 
-## Current Score: **9.6 / 10**
+## Current Score: **9.7 / 10**
 
 ### Done recently (July 30 full ship pass)
+- **Confidential Box** — encrypted one-time vault; Autopilot deploys via Vercel/GitHub APIs without dashboards
 - **Export quality** — secret-free ZIP, merged preview deps, smarter imports, EXPORT_QUALITY.md, client directive only when needed
 - **Gallery** — Publish from Projects, Share on gallery cards, remix analytics
 - **Autopilot** — accurate progress bar; Server Autopilot toggle; token guidance

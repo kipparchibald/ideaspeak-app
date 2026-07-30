@@ -5,6 +5,7 @@ import {
   MicOff,
   Send,
   Settings,
+  Shield,
   X,
   Copy,
   Download,
@@ -79,6 +80,8 @@ import {
 } from './lib/session-history'
 import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
 import { DemoLaunchPanel } from './components/DemoLaunchPanel'
+import { ConfidentialBoxPanel } from './components/ConfidentialBoxPanel'
+import { tryAutoUnlock } from './lib/confidential-box'
 import { track } from './lib/analytics'
 import {
   clearShareParamFromUrl,
@@ -414,6 +417,21 @@ function SettingsModal({
               </button>
             </div>
 
+            <button
+              type="button"
+              onClick={() => {
+                onClose()
+                // parent opens vault via custom event
+                window.dispatchEvent(new CustomEvent('ideaspeak-open-vault'))
+              }}
+              className="mb-5 w-full flex items-center gap-3 rounded-xl border border-[#00ff88]/30 bg-[#00ff88]/08 px-3.5 py-3 text-left hover:bg-[#00ff88]/12 transition-colors"
+            >
+              <span className="text-[13px] font-semibold text-[#00ff88]">Open Confidential Box</span>
+              <span className="text-[11px] text-[#00ff88]/70">
+                One vault · hands-off GitHub + Vercel ship
+              </span>
+            </button>
+
             {!grokLive && (
               <div className="mb-5 rounded-xl border border-[#00ff88]/25 bg-[#00ff88]/06 px-3.5 py-3">
                 <p className="text-[12px] font-semibold text-[#00ff88] mb-1">
@@ -567,6 +585,7 @@ export default function App() {
   const [showProjects, setShowProjects] = useState(false)
   const [showGithubImport, setShowGithubImport] = useState(false)
   const [showDemo, setShowDemo] = useState(false)
+  const [showConfidential, setShowConfidential] = useState(false)
   const [projectsRevision, setProjectsRevision] = useState(0)
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() =>
     getActiveWorkspaceId(),
@@ -1055,6 +1074,7 @@ export default function App() {
       else if (showAutopilot) setShowAutopilot(false)
       else if (showCouncil) setShowCouncil(false)
       else if (showVision) setShowVision(false)
+      else if (showConfidential) setShowConfidential(false)
       else if (showDemo) setShowDemo(false)
       else if (showGallery) setShowGallery(false)
       else if (showPolish) setShowPolish(false)
@@ -1073,6 +1093,7 @@ export default function App() {
     showVision,
     showGallery,
     showDemo,
+    showConfidential,
     showPolish,
     showShip,
     showSettings,
@@ -1180,6 +1201,7 @@ export default function App() {
       setActiveWorkspaceId(id)
     }
     setSessionReady(true)
+    void tryAutoUnlock()
   }, [loadWorkspaceIntoApp])
 
   useEffect(() => {
@@ -2204,6 +2226,15 @@ export default function App() {
             )}
           </button>
           <button
+            onClick={() => setShowConfidential(true)}
+            className="inline-flex items-center gap-1 h-9 px-2 sm:px-2.5 rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/08 text-[12px] text-[#00ff88] hover:bg-[#00ff88]/12 transition-colors"
+            title="Confidential Box — secrets once, ship hands-off"
+            aria-label="Confidential Box"
+          >
+            <Shield size={14} />
+            <span className="hidden sm:inline">Vault</span>
+          </button>
+          <button
             onClick={() => {
               track('settings_open')
               setShowSettings(true)
@@ -3127,6 +3158,17 @@ export default function App() {
         open={showGithubImport}
         onClose={() => setShowGithubImport(false)}
         onImported={handleGithubImport}
+      />
+
+      <ConfidentialBoxPanel
+        open={showConfidential}
+        onClose={() => setShowConfidential(false)}
+        onSaved={() => {
+          void tryAutoUnlock()
+        }}
+        onLaunchAutopilot={() => {
+          setShowAutopilot(true)
+        }}
       />
 
       <DemoLaunchPanel

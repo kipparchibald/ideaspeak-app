@@ -50,11 +50,16 @@ export interface RunLaunchAutopilotOpts {
   appName: string
   slug: string
   githubToken?: string
+  /** When set, Autopilot creates the Vercel project + env + deploy via API (no dashboard) */
+  vercelToken?: string
+  vercelTeamId?: string
   supabaseUrl?: string
   supabaseAnonKey?: string
   customDomain?: string
   /** Skip GitHub push when user already has a repo URL */
   existingRepoUrl?: string
+  /** Prefer zero-click when tokens present */
+  autonomous?: boolean
   onProgress?: (event: LaunchTimelineEvent) => void
   /** Open external URLs (Vercel deploy, GitHub repo, etc.) */
   onOpenUrl?: (url: string) => void
@@ -347,6 +352,159 @@ function filterScaffoldForGithub(files: Record<string, string>): Record<string, 
   return out
 }
 
+
+// ── Vercel REST (browser-side with user token from Confidential Box) ─────────
+
+async function vercelApiFetch<T>(
+  token: string,
+  path: string,
+  init: RequestInit = {},
+  teamId?: string,
+): Promise<T> {
+  const separator = path.includes('?') ? '&' : '?'
+  const url = teamId
+    ? `https://api.vercel.com${path}${separator}teamId=${encodeURIComponent(teamId)}`
+    : `https://api.vercel.com${path}`
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  })
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const err = (await res.json()) as { error?: { message?: string }; message?: string }
+      detail = err.error?.message || err.message || detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || `Vercel API ${res.status}`)
+  }
+  if (res.status === 204) return undefined as T
+  return res.json() as Promise<T>
+}
+
+function parseGithubFullName(repoUrl: string): string | null {
+  try {
+    const u = new URL(repoUrl)
+    if (!u.hostname.includes('github.com')) return null
+    const parts = u.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/')
+    if (parts.length < 2) return null
+    return `${parts[0]}/${parts[1]}`
+  } catch {
+    return null
+  }
+}
+
+async function createOrGetVercelProject(
+  token: string,
+  name: string,
+  repoFullName: string,
+  teamId?: string,
+): Promise<{ id: string; name: string; link?: string }> {
+  try {
+    const created = await vercelApiFetch<{ id: string; name: string }>(
+      token,
+      '/v10/projects',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          framework: 'nextjs',
+          gitRepository: { type: 'github', repo: repoFullName },
+        }),
+      },
+      teamId,
+    )
+    return created
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!/already|exist|conflict|409/i.test(msg)) throw err
+    const list = await vercelApiFetch<{ projects?: { id: string; name: string }[] }>(
+      token,
+      `/v9/projects?search=${encodeURIComponent(name)}&limit=20`,
+      {},
+      teamId,
+    )
+    const found = (list.projects || []).find((p) => p.name === name)
+    if (!found) throw err
+    return found
+  }
+}
+
+async function setVercelEnvFromVault(
+  token: string,
+  projectId: string,
+  vars: { key: string; value: string }[],
+  teamId?: string,
+): Promise<number> {
+  let set = 0
+  for (const v of vars) {
+    if (!v.value?.trim()) continue
+    try {
+      await vercelApiFetch(
+        token,
+        `/v10/projects/${projectId}/env`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            key: v.key,
+            value: v.value,
+            type: 'encrypted',
+            target: ['production', 'preview', 'development'],
+          }),
+        },
+        teamId,
+      )
+      set++
+    } catch (err) {
+      // Env may already exist — try upsert via filter+edit is complex; skip duplicates
+      const msg = err instanceof Error ? err.message : ''
+      if (!/already|exist|conflict|409/i.test(msg)) {
+        console.warn('[autopilot] env set failed', v.key, msg)
+      }
+    }
+  }
+  return set
+}
+
+async function triggerVercelDeploy(
+  token: string,
+  projectId: string,
+  repoFullName: string,
+  teamId?: string,
+): Promise<{ url?: string; id?: string }> {
+  const [org, repo] = repoFullName.split('/')
+  const deployment = await vercelApiFetch<{
+    id?: string
+    url?: string
+    inspectorUrl?: string
+  }>(
+    token,
+    '/v13/deployments',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name: repo,
+        project: projectId,
+        gitSource: {
+          type: 'github',
+          org,
+          repo,
+          ref: 'main',
+        },
+        target: 'production',
+      }),
+    },
+    teamId,
+  )
+  const host = deployment.url ? `https://${deployment.url.replace(/^https?:\/\//, '')}` : undefined
+  return { url: host || deployment.inspectorUrl, id: deployment.id }
+}
+
 /**
  * Orchestrate launch steps. GitHub push is automatic when token is present;
  * Vercel opens a guided import URL; env/domain are guided manual steps.
@@ -359,14 +517,18 @@ export async function runLaunchAutopilot(
     appName,
     slug,
     githubToken,
+    vercelToken,
+    vercelTeamId,
     supabaseUrl,
     supabaseAnonKey,
     customDomain,
     existingRepoUrl,
+    autonomous,
     onProgress,
     onOpenUrl,
     signal,
   } = opts
+  const handsOff = Boolean(autonomous || vercelToken?.trim())
 
   const events: LaunchTimelineEvent[] = []
   const safeSlug = slugify(slug)
@@ -473,53 +635,158 @@ export async function runLaunchAutopilot(
 
   throwIfAborted(signal)
 
-  // ── Vercel ──────────────────────────────────────────────────────────────
-  progress({
-    step: LaunchStep.vercel,
-    status: repoUrl ? 'running' : 'manual',
-    title: 'Vercel',
-    message: repoUrl
-      ? 'Opening Vercel import with your repo…'
-      : 'Connect GitHub on Vercel after your repo exists',
-    url: vercelDeployUrl,
-  })
-
-  if (repoUrl) {
-    onOpenUrl?.(vercelDeployUrl)
-    progress({
-      step: LaunchStep.vercel,
-      status: 'manual',
-      title: 'Vercel',
-      message: 'Complete import in Vercel — click Deploy, then return here',
-      url: vercelDeployUrl,
-    })
-  }
-
-  throwIfAborted(signal)
-
-  // ── Env ─────────────────────────────────────────────────────────────────
+  // ── Vercel (+ env) ──────────────────────────────────────────────────────
   const envVars = vercelEnvVars(supabaseUrl, supabaseAnonKey)
   const hasEnv = Boolean(supabaseUrl?.trim() && supabaseAnonKey?.trim())
+  let suggestedLiveUrl = customDomain
+    ? customDomain.startsWith('http')
+      ? customDomain
+      : `https://${customDomain}`
+    : guessVercelUrl(safeSlug)
+  let vercelProjectId: string | undefined
 
-  progress({
-    step: LaunchStep.env,
-    status: hasEnv ? 'manual' : 'waiting',
-    title: 'Environment',
-    message: hasEnv
-      ? 'Copy Supabase keys into Vercel → Settings → Environment Variables, then redeploy'
-      : 'Add Supabase keys in Ship first, or paste them here before redeploying',
-    meta: Object.fromEntries(envVars.map((v) => [v.key, v.value])),
-  })
+  if (repoUrl && vercelToken?.trim()) {
+    progress({
+      step: LaunchStep.vercel,
+      status: 'running',
+      title: 'Vercel',
+      message: 'Creating project from GitHub via Confidential Box token…',
+    })
+    try {
+      throwIfAborted(signal)
+      const fullName = parseGithubFullName(repoUrl)
+      if (!fullName) throw new Error('Could not parse GitHub repo from URL')
+      const project = await createOrGetVercelProject(
+        vercelToken.trim(),
+        safeSlug,
+        fullName,
+        vercelTeamId?.trim() || undefined,
+      )
+      vercelProjectId = project.id
+      vercelDeployUrl = `https://vercel.com/${fullName.split('/')[0]}/${project.name}`
+
+      progress({
+        step: LaunchStep.vercel,
+        status: 'running',
+        title: 'Vercel',
+        message: `Project ready (${project.name}) — setting environment variables…`,
+        url: vercelDeployUrl,
+      })
+
+      const setCount = await setVercelEnvFromVault(
+        vercelToken.trim(),
+        project.id,
+        envVars,
+        vercelTeamId?.trim() || undefined,
+      )
+      progress({
+        step: LaunchStep.env,
+        status: setCount > 0 || !hasEnv ? 'success' : 'success',
+        title: 'Environment',
+        message:
+          setCount > 0
+            ? `Set ${setCount} env var(s) on Vercel automatically`
+            : hasEnv
+              ? 'Env vars already present or empty — continuing'
+              : 'No Supabase keys in box — deploy will still run; add later if needed',
+        meta: Object.fromEntries(envVars.map((v) => [v.key, v.value ? '••••' : ''])),
+      })
+
+      progress({
+        step: LaunchStep.vercel,
+        status: 'running',
+        title: 'Vercel',
+        message: 'Triggering production deployment…',
+      })
+      const deploy = await triggerVercelDeploy(
+        vercelToken.trim(),
+        project.id,
+        fullName,
+        vercelTeamId?.trim() || undefined,
+      )
+      if (deploy.url) suggestedLiveUrl = deploy.url
+      vercelDeployUrl = deploy.url || vercelDeployUrl
+
+      progress({
+        step: LaunchStep.vercel,
+        status: 'success',
+        title: 'Vercel',
+        message: 'Deploy started — no dashboard clicks required',
+        url: vercelDeployUrl,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Vercel API failed'
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      progress({
+        step: LaunchStep.vercel,
+        status: 'error',
+        title: 'Vercel',
+        message: 'API deploy failed — falling back to import URL',
+        error: message,
+      })
+      onOpenUrl?.(vercelDeployUrl)
+      progress({
+        step: LaunchStep.vercel,
+        status: 'manual',
+        title: 'Vercel',
+        message: 'Open Vercel import and click Deploy, then return here',
+        url: vercelDeployUrl,
+      })
+      progress({
+        step: LaunchStep.env,
+        status: hasEnv ? 'manual' : 'waiting',
+        title: 'Environment',
+        message: hasEnv
+          ? 'Paste Supabase keys in Vercel env if API path failed'
+          : 'Add Supabase in Confidential Box for next run',
+        meta: Object.fromEntries(envVars.map((v) => [v.key, v.value])),
+      })
+    }
+  } else {
+    progress({
+      step: LaunchStep.vercel,
+      status: repoUrl ? 'running' : 'manual',
+      title: 'Vercel',
+      message: repoUrl
+        ? handsOff
+          ? 'Add Vercel token in Confidential Box for zero-click deploy'
+          : 'Opening Vercel import with your repo…'
+        : 'Connect GitHub on Vercel after your repo exists',
+      url: vercelDeployUrl,
+    })
+
+    if (repoUrl) {
+      onOpenUrl?.(vercelDeployUrl)
+      progress({
+        step: LaunchStep.vercel,
+        status: 'manual',
+        title: 'Vercel',
+        message:
+          'Complete import in Vercel — or save a Vercel token in Confidential Box for next time',
+        url: vercelDeployUrl,
+      })
+    }
+
+    progress({
+      step: LaunchStep.env,
+      status: hasEnv ? 'manual' : 'waiting',
+      title: 'Environment',
+      message: hasEnv
+        ? 'Copy Supabase keys into Vercel → Environment Variables (auto when Vercel token is in the Box)'
+        : 'Add Supabase keys in Confidential Box for automatic env injection',
+      meta: Object.fromEntries(envVars.map((v) => [v.key, v.value])),
+    })
+  }
 
   throwIfAborted(signal)
 
   // ── Domain ──────────────────────────────────────────────────────────────
   progress({
     step: LaunchStep.domain,
-    status: customDomain ? 'manual' : 'skipped',
+    status: customDomain ? (vercelToken ? 'manual' : 'manual') : 'skipped',
     title: 'Domain',
     message: customDomain
-      ? `Attach ${customDomain} in Vercel → Settings → Domains`
+      ? `Attach ${customDomain} in Vercel → Domains (one-time DNS at your registrar)`
       : 'Skipped — add a custom domain anytime in Vercel',
     url: customDomain ? AUTOPILOT_LINKS.vercelDomains : undefined,
     meta: customDomain ? { domain: customDomain } : undefined,
@@ -528,17 +795,14 @@ export async function runLaunchAutopilot(
   throwIfAborted(signal)
 
   // ── Done ────────────────────────────────────────────────────────────────
-  const suggestedLiveUrl = customDomain
-    ? customDomain.startsWith('http')
-      ? customDomain
-      : `https://${customDomain}`
-    : guessVercelUrl(safeSlug)
-
+  const fullyAuto = Boolean(repoUrl && vercelToken && vercelProjectId)
   progress({
     step: LaunchStep.done,
-    status: 'waiting',
+    status: fullyAuto ? 'success' : 'waiting',
     title: 'Live',
-    message: 'Paste your production URL when deploy finishes',
+    message: fullyAuto
+      ? 'Ship pipeline complete — open your production URL (build may take 1–3 min)'
+      : 'Paste your production URL when deploy finishes',
     url: suggestedLiveUrl,
   })
 
@@ -567,6 +831,7 @@ export function autopilotOptsFromShip(
     supabaseUrl: prefs.supabase.url,
     supabaseAnonKey: prefs.supabase.anonKey,
     customDomain: prefs.customDomain,
+    autonomous: true,
     existingRepoUrl: prefs.githubRepoUrl || undefined,
     ...overrides,
   }

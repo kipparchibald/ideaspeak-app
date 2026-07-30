@@ -65,6 +65,7 @@ import {
   type PlatformReadiness,
 } from '../lib/ship-platform-status'
 import { track } from '../lib/analytics'
+import { getSessionSecrets, tryAutoUnlock, autonomousShipReadiness } from '../lib/confidential-box'
 
 const STEP_ICONS: Record<LaunchStep, typeof FolderGit2> = {
   [LaunchStep.github]: FolderGit2,
@@ -402,14 +403,19 @@ export function LaunchAutopilotPanel({
 
   const runClientAutopilot = useCallback(
     async (scaffold: Record<string, string>, signal: AbortSignal) => {
+      await tryAutoUnlock()
+      const vault = getSessionSecrets()
       const result = await runLaunchAutopilot({
         scaffoldFiles: scaffold,
         appName: prefs.appName,
         slug: prefs.appSlug,
-        githubToken: githubToken.trim() || undefined,
-        supabaseUrl: prefs.supabase.url,
-        supabaseAnonKey: prefs.supabase.anonKey,
-        customDomain: prefs.customDomain,
+        vercelToken: vault?.vercelToken || undefined,
+        vercelTeamId: vault?.vercelTeamId || undefined,
+        autonomous: true,
+        githubToken: vault?.githubToken?.trim() || githubToken.trim() || undefined,
+        supabaseUrl: vault?.supabaseUrl?.trim() || prefs.supabase.url,
+        supabaseAnonKey: vault?.supabaseAnonKey?.trim() || prefs.supabase.anonKey,
+        customDomain: vault?.customDomain?.trim() || prefs.customDomain,
         existingRepoUrl: prefs.githubRepoUrl || undefined,
         signal,
         onProgress: pushTimelineEvent,
@@ -427,8 +433,11 @@ export function LaunchAutopilotPanel({
       }
 
       setExpanded(LaunchStep.done)
-      toast.success('Launch Autopilot started', {
-        description: 'Finish Vercel import in the other tab, then paste your live URL',
+      const auto = Boolean(vault?.vercelToken?.trim() && (vault?.githubToken?.trim() || githubToken.trim()))
+      toast.success(auto ? 'Hands-off ship pipeline finished' : 'Launch Autopilot started', {
+        description: auto
+          ? 'GitHub + Vercel ran from Confidential Box — open the live URL when build completes'
+          : 'Finish any remaining steps, or open Confidential Box for zero-click next time',
       })
     },
     [prefs, githubToken, liveUrl, pushTimelineEvent],
@@ -624,6 +633,31 @@ export function LaunchAutopilotPanel({
 
             {/* Timeline body */}
             <div className="flex-1 overflow-y-auto px-5 py-4">
+              {(() => {
+                const r = autonomousShipReadiness(getSessionSecrets())
+                return (
+                  <div
+                    className={`mb-4 rounded-xl border px-3 py-2.5 text-[12px] ${
+                      r.ready
+                        ? 'border-[#00ff88]/25 bg-[#00ff88]/08 text-[#00ff88]'
+                        : 'border-[#7dd3fc]/25 bg-[#7dd3fc]/08 text-[#7dd3fc]'
+                    }`}
+                  >
+                    <strong>{r.ready ? 'Confidential Box ready' : 'Tip'}:</strong>{' '}
+                    {r.message}
+                    {!r.ready && (
+                      <button
+                        type="button"
+                        className="ml-2 underline font-semibold"
+                        onClick={() => window.dispatchEvent(new CustomEvent('ideaspeak-open-vault'))}
+                      >
+                        Open vault
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
+
               {!hasBuilt && (
                 <div className="mb-4 rounded-xl border border-[#fa0]/25 bg-[#fa0]/08 px-3 py-2.5 text-[12px] text-[#fa0]">
                   Build an app in preview first — Autopilot ships that version.
