@@ -2,6 +2,7 @@ import { StrictMode, Component, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { initAnalytics } from './lib/analytics'
 
 class RootErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null }
@@ -24,7 +25,7 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: stri
               }}
               style={{ background: '#00ff88', color: '#0a0a0f', border: 'none', borderRadius: '12px', padding: '0.75rem 1.25rem', fontWeight: 600, cursor: 'pointer' }}
             >
-              Clear cache &amp; reload
+              Clear cache & reload
             </button>
           </div>
         </div>
@@ -33,6 +34,8 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: stri
     return this.props.children
   }
 }
+
+initAnalytics()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

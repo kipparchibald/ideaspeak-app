@@ -10,7 +10,16 @@
 
 ---
 
-## Current Score: **9.4 / 10**
+## Current Score: **9.6 / 10**
+
+### Done recently (July 30 full ship pass)
+- **Export quality** — secret-free ZIP, merged preview deps, smarter imports, EXPORT_QUALITY.md, client directive only when needed
+- **Gallery** — Publish from Projects, Share on gallery cards, remix analytics
+- **Autopilot** — accurate progress bar; Server Autopilot toggle; token guidance
+- **Stripe edge** — `/api/stripe/status` + `/api/stripe/checkout` on Vercel
+- **Analytics funnel** — local ring + optional Plausible/PostHog (`src/lib/analytics.ts`)
+- **Demo panel** — 30s Speak → Preview → Ship walkthrough (+ VITE_DEMO_VIDEO_URL)
+- **Env matrix** — GITHUB/VERCEL/SHIP_WORKER + analytics vars in `.env.example`
 
 ### Done recently (July 30 polish pass · continued)
 - **Shareable build links** — Projects → Share copies `?share=` payload; open restores plan/preview

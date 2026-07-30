@@ -20,6 +20,7 @@ import {
   handleCheckoutReturn,
   type PlanId,
 } from '../lib/billing'
+import { track } from '../lib/analytics'
 
 interface PricingPanelProps {
   open: boolean
@@ -52,6 +53,7 @@ export function PricingPanel({ open, onClose, onPlanChange }: PricingPanelProps)
     if (returned) {
       setLocalPlan(returned)
       onPlanChange?.(returned)
+      track('checkout_success', { plan: returned })
       toast.success(`${returned === 'team' ? 'Team' : 'Pro'} plan active`, {
         description: 'Thanks for subscribing — unlimited builds & Ship unlocked.',
       })
@@ -68,6 +70,7 @@ export function PricingPanel({ open, onClose, onPlanChange }: PricingPanelProps)
         })
         return
       }
+      track('checkout_start', { plan: id })
       window.location.href = url
     } finally {
       setCheckoutLoading(null)

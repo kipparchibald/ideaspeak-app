@@ -339,6 +339,7 @@ await step('Unit: production ship scaffold', async () => {
     'SHIP.md',
     'vercel.json',
     'README.md',
+    'EXPORT_QUALITY.md',
     'polish/prompts/cursor.md',
     '.cursorrules',
   ]) {

@@ -64,6 +64,7 @@ import {
   provisioningLaunchCopy,
   type PlatformReadiness,
 } from '../lib/ship-platform-status'
+import { track } from '../lib/analytics'
 
 const STEP_ICONS: Record<LaunchStep, typeof FolderGit2> = {
   [LaunchStep.github]: FolderGit2,
@@ -120,7 +121,8 @@ export function LaunchAutopilotPanel({
   const [githubToken, setGithubToken] = useState(() => loadGithubToken())
   const [showToken, setShowToken] = useState(false)
   const [launching, setLaunching] = useState(false)
-  const [useServerAutopilot] = useState(() => IN_HOUSE_PLATFORM || !loadGithubToken().trim())
+  const [useServerAutopilot, setUseServerAutopilot] = useState(() => IN_HOUSE_PLATFORM || !loadGithubToken().trim())
+
   const [events, setEvents] = useState<LaunchTimelineEvent[]>([])
   const [deployChangelog, setDeployChangelog] = useState<string | null>(null)
   const [liveUrl, setLiveUrl] = useState(() => loadAutopilotState()?.liveUrl || '')
@@ -330,6 +332,7 @@ export function LaunchAutopilotPanel({
 
     resumeAttemptedRef.current = persisted.jobId
     setResumingJob(true)
+    track('autopilot_start', { server: useServerAutopilot })
     setLaunching(true)
 
     abortRef.current?.abort()
@@ -365,11 +368,17 @@ export function LaunchAutopilotPanel({
 
   const launchProgress = useMemo(() => {
     const order = LAUNCH_STEPS.map((s) => s.id)
+    // Only fully completed steps count — manual/waiting are in-progress guidance, not done
     const done = order.filter((id) => {
       const st = stepStatus.get(id)?.status
-      return st === 'success' || st === 'manual' || st === 'skipped' || st === 'waiting'
+      return st === 'success' || st === 'skipped'
     }).length
-    return Math.round((done / order.length) * 100)
+    const active = order.filter((id) => {
+      const st = stepStatus.get(id)?.status
+      return st === 'running' || st === 'manual' || st === 'waiting'
+    }).length
+    const partial = active * 0.35
+    return Math.min(100, Math.round(((done + partial) / order.length) * 100))
   }, [stepStatus])
 
   const envVars = useMemo(
@@ -584,17 +593,17 @@ export function LaunchAutopilotPanel({
                   <span className="font-mono text-[#aaa]">{fabricLiveUrl(prefs.appSlug)}</span>
                 </p>
               ) : (
-                <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+                <label className="mt-3 flex items-start gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={useServerAutopilot}
-                    readOnly
-                    disabled
-                    className="rounded border-[#2a2a35] bg-[#111116] text-[#7dd3fc]"
+                    onChange={(e) => setUseServerAutopilot(e.target.checked)}
+                    className="mt-0.5 rounded border-[#2a2a35] bg-[#111116] text-[#7dd3fc]"
                   />
-                  <span className="text-[11px] text-[#888]">
+                  <span className="text-[11px] text-[#888] leading-relaxed">
                     <span className="font-semibold text-[#aaa]">Server Autopilot</span>
-                    {' — run deploy on IdeaSpeak infrastructure'}
+                    {' — IdeaSpeak worker (needs GITHUB_TOKEN + VERCEL_TOKEN on Railway). '}
+                    Off = browser GitHub PAT + guided Vercel open.
                   </span>
                 </label>
               )}

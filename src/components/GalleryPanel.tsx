@@ -2,11 +2,13 @@
  * GalleryPanel — remix featured voice-built apps into your workspace
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Sparkles, Eye, Shuffle, LayoutGrid, Star, Globe } from 'lucide-react'
-import { listFeaturedGallery, listPublicGallery, type GalleryEntry } from '../lib/gallery'
+import { X, Sparkles, Eye, Shuffle, LayoutGrid, Star, Globe, Share2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { listFeaturedGallery, listPublicGallery, shareGalleryEntry, type GalleryEntry } from '../lib/gallery'
 import { formatRelativeTime } from '../lib/projects'
+import { track } from '../lib/analytics'
 
 type GalleryFilter = 'featured' | 'public'
 
@@ -25,9 +27,29 @@ export function GalleryPanel({ open, onClose, onRemix }: GalleryPanelProps) {
   }, [open, filter])
 
   const handleRemix = (entry: GalleryEntry) => {
+    track('gallery_remix', { id: entry.id, name: entry.name })
     onRemix(entry)
     setPreviewEntry(null)
     onClose()
+  }
+
+  const handleShare = async (entry: GalleryEntry, e?: MouseEvent) => {
+    e?.stopPropagation()
+    try {
+      const result = await shareGalleryEntry(entry)
+      if (!result) {
+        toast.error('Could not share this build')
+        return
+      }
+      track('share_copy', { source: 'gallery', id: entry.id })
+      toast.success('Share link copied', {
+        description: result.truncated
+          ? 'Plan included — full files may need remix on this device.'
+          : 'Anyone can open this link in IdeaSpeak to remix.',
+      })
+    } catch {
+      toast.error('Could not copy share link')
+    }
   }
 
   return (
@@ -128,19 +150,28 @@ export function GalleryPanel({ open, onClose, onRemix }: GalleryPanelProps) {
                           {entry.transcriptExcerpt}
                         </p>
 
-                        <div className="mt-auto flex gap-2">
+                        <div className="mt-auto flex gap-1.5">
                           <button
                             type="button"
                             onClick={() => setPreviewEntry(entry)}
-                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-[#1f1f27] text-[11px] font-semibold text-[#888] hover:text-[#ccc] hover:border-[#333] transition-colors"
+                            className="flex-1 inline-flex items-center justify-center gap-1 py-2 rounded-lg border border-[#1f1f27] text-[11px] font-semibold text-[#888] hover:text-[#ccc] hover:border-[#333] transition-colors"
                           >
                             <Eye size={12} />
                             Preview
                           </button>
                           <button
                             type="button"
+                            onClick={(e) => void handleShare(entry, e)}
+                            className="inline-flex items-center justify-center px-2.5 py-2 rounded-lg border border-[#1f1f27] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35"
+                            aria-label={`Share ${entry.name}`}
+                            title="Copy share link"
+                          >
+                            <Share2 size={12} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleRemix(entry)}
-                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-[#00ff88]/35 bg-[#00ff88]/10 text-[11px] font-bold text-[#00ff88] hover:bg-[#00ff88]/15 transition-colors"
+                            className="flex-1 inline-flex items-center justify-center gap-1 py-2 rounded-lg border border-[#00ff88]/35 bg-[#00ff88]/10 text-[11px] font-bold text-[#00ff88] hover:bg-[#00ff88]/15 transition-colors"
                           >
                             <Shuffle size={12} />
                             Remix

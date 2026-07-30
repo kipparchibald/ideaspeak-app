@@ -497,14 +497,21 @@ function rewriteImportsForNext(code: string): string {
   return code
     .replace(/from\s+['"]\.\/components\//g, "from '@/components/")
     .replace(/from\s+['"]\.\.\/components\//g, "from '@/components/")
+    .replace(/from\s+['"]@\/src\/components\//g, "from '@/components/")
     .replace(/from\s+['"]\.\/hooks\//g, "from '@/hooks/")
     .replace(/from\s+['"]\.\.\/hooks\//g, "from '@/hooks/")
     .replace(/from\s+['"]\.\/lib\//g, "from '@/lib/")
     .replace(/from\s+['"]\.\.\/lib\//g, "from '@/lib/")
     .replace(/from\s+['"]\.\/utils\//g, "from '@/lib/utils/")
     .replace(/from\s+['"]\.\.\/utils\//g, "from '@/lib/utils/")
+    .replace(/from\s+['"]\.\/ui\//g, "from '@/components/ui/")
+    .replace(/from\s+['"]\.\.\/ui\//g, "from '@/components/ui/")
+    .replace(/from\s+['"]src\/components\//g, "from '@/components/")
+    .replace(/from\s+['"]src\/lib\//g, "from '@/lib/")
     .replace(/from\s+['"]\.\/App['"]/g, "from '@/app/page'")
+    .replace(/from\s+['"]\.\/App\.tsx['"]/g, "from '@/app/page'")
     .replace(/from\s+['"]\.\/index\.css['"]/g, "from '@/app/globals.css'")
+    .replace(/from\s+['"]\.\/assets\//g, "from '@/public/")
 }
 
 function stripPreviewOnlySource(code: string): string {
@@ -553,11 +560,12 @@ function buildPageSource(appName: string, preview: Record<string, string>): stri
   }
 
   const needsClient =
-    /\buseState\b|\buseEffect\b|\buseMemo\b|\buseCallback\b|\buseRef\b|\buseReducer\b|\bonClick\b|\bonChange\b/.test(
+    /\buseState\b|\buseEffect\b|\buseMemo\b|\buseCallback\b|\buseRef\b|\buseReducer\b|\bonClick\b|\bonChange\b|\bonSubmit\b|\bonKeyDown\b/.test(
       body,
     )
 
-  return needsClient ? `'use client'\n\n${body}` : `'use client'\n\n${body}`
+  // Server Components by default; only mark client when interactive
+  return needsClient ? `'use client'\n\n${body}` : body
 }
 
 function extractPreviewCss(preview: Record<string, string>): string {
@@ -657,6 +665,45 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
 }
 
+
+/** Merge agent preview package.json deps into the production Next scaffold */
+function mergePreviewPackageJson(
+  base: Record<string, unknown>,
+  preview: Record<string, string>,
+): Record<string, unknown> {
+  const raw = preview['package.json']
+  if (!raw?.trim()) return base
+  try {
+    const parsed = JSON.parse(raw) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const deps = { ...(base.dependencies as Record<string, string>) }
+    const devDeps = { ...(base.devDependencies as Record<string, string>) }
+    const skip = new Set([
+      'react',
+      'react-dom',
+      'react-scripts',
+      'vite',
+      '@vitejs/plugin-react',
+      'parcel',
+      'webpack',
+      'next',
+    ])
+    for (const [name, ver] of Object.entries(parsed.dependencies || {})) {
+      if (skip.has(name) || name.startsWith('@types/')) continue
+      if (!deps[name]) deps[name] = ver
+    }
+    for (const [name, ver] of Object.entries(parsed.devDependencies || {})) {
+      if (skip.has(name)) continue
+      if (!devDeps[name] && !deps[name]) devDeps[name] = ver
+    }
+    return { ...base, dependencies: deps, devDependencies: devDeps }
+  } catch {
+    return base
+  }
+}
+
 /**
  * Build a production-oriented file map for ZIP export.
  * Sandpack React preview files are lifted into app/ and supporting modules.
@@ -674,42 +721,44 @@ export function buildProductionScaffold(opts: {
   const pageSource = buildPageSource(appName, preview)
   const previewCss = extractPreviewCss(preview)
 
-  const files: Record<string, string> = {
-    'package.json': JSON.stringify(
-      {
-        name: appSlug,
-        version: '1.0.0',
-        private: true,
-        scripts: {
-          dev: 'next dev',
-          build: 'next build',
-          start: 'next start',
-          lint: 'next lint',
-        },
-        dependencies: {
-          next: '^15.1.0',
-          react: '^19.0.0',
-          'react-dom': '^19.0.0',
-          '@supabase/supabase-js': '^2.49.0',
-          '@supabase/ssr': '^0.6.0',
-          'framer-motion': '^11.15.0',
-          'lucide-react': '^0.469.0',
-        },
-        devDependencies: {
-          typescript: '^5.7.0',
-          '@types/node': '^22.10.0',
-          '@types/react': '^19.0.0',
-          '@types/react-dom': '^19.0.0',
-          tailwindcss: '^3.4.17',
-          postcss: '^8.4.49',
-          autoprefixer: '^10.4.20',
-          eslint: '^9.17.0',
-          'eslint-config-next': '^15.1.0',
-        },
+  const packageJson = mergePreviewPackageJson(
+    {
+      name: appSlug,
+      version: '1.0.0',
+      private: true,
+      scripts: {
+        dev: 'next dev',
+        build: 'next build',
+        start: 'next start',
+        lint: 'next lint',
+        typecheck: 'tsc --noEmit',
       },
-      null,
-      2,
-    ),
+      dependencies: {
+        next: '^15.1.0',
+        react: '^19.0.0',
+        'react-dom': '^19.0.0',
+        '@supabase/supabase-js': '^2.49.0',
+        '@supabase/ssr': '^0.6.0',
+        'framer-motion': '^11.15.0',
+        'lucide-react': '^0.469.0',
+      },
+      devDependencies: {
+        typescript: '^5.7.0',
+        '@types/node': '^22.10.0',
+        '@types/react': '^19.0.0',
+        '@types/react-dom': '^19.0.0',
+        tailwindcss: '^3.4.17',
+        postcss: '^8.4.49',
+        autoprefixer: '^10.4.20',
+        eslint: '^9.17.0',
+        'eslint-config-next': '^15.1.0',
+      },
+    },
+    preview,
+  )
+
+  const files: Record<string, string> = {
+    'package.json': JSON.stringify(packageJson, null, 2),
     '.eslintrc.json': JSON.stringify({ extends: 'next/core-web-vitals' }, null, 2),
     'tsconfig.json': JSON.stringify(
       {
@@ -776,7 +825,15 @@ export default config
     'vercel.json': vercelJson(),
     '.gitignore': gitignore(),
     '.env.example': envExampleContents(tenantId),
-    '.env.local': envLocalContents(prefs),
+    // Never ship real secrets in downloadable ZIPs — placeholders only
+    '.env.local': envLocalContents({
+      ...prefs,
+      supabase: {
+        url: '',
+        anonKey: '',
+        projectRef: prefs.supabase.projectRef || '',
+      },
+    }),
     'AGENTS.md': agentsMd(appName),
     '.cursorrules': cursorrules(appName),
     'IDEA-SPEAK-CONTEXT.md': ideaSpeakContext(appName, idea),
@@ -822,6 +879,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     'app/page.tsx': pageSource,
     'SHIP.md': buildShipMd(appName, prefs),
     'README.md': buildReadme(appName, appSlug, prefs),
+    'EXPORT_QUALITY.md': exportQualityMd(),
   }
 
   // Agent-generated modules (components, hooks, lib, etc.)
@@ -857,6 +915,37 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
 
   return files
+}
+
+
+function exportQualityMd(): string {
+  return [
+    '# Export quality checklist',
+    '',
+    'This project was packaged by IdeaSpeak.',
+    '',
+    '## Verify locally',
+    '```bash',
+    'bun install   # or npm install',
+    'cp .env.example .env.local   # fill Supabase if needed',
+    'bun dev',
+    'bun run build   # must pass before deploy',
+    '```',
+    '',
+    '## Included',
+    '- Next.js 15 App Router + TypeScript + Tailwind',
+    '- Supabase client/server stubs + schema.sql',
+    '- vercel.json (framework: nextjs)',
+    '- Deploy with Vercel button in README',
+    '- AGENTS.md + multi-model polish prompts',
+    '- No real secrets (.env.local is placeholders only)',
+    '',
+    '## If build fails',
+    '1. Check import paths use @/ aliases',
+    '2. Run bun run typecheck / tsc --noEmit',
+    '3. Re-export from IdeaSpeak after fixing the live preview',
+    '',
+  ].join('\n')
 }
 
 function buildShipMd(appName: string, prefs: ShipPreferences): string {

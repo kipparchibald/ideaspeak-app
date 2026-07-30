@@ -78,6 +78,8 @@ import {
   shouldRestoreWorkspace,
 } from './lib/session-history'
 import { ProjectsLibraryPanel } from './components/ProjectsLibraryPanel'
+import { DemoLaunchPanel } from './components/DemoLaunchPanel'
+import { track } from './lib/analytics'
 import {
   clearShareParamFromUrl,
   decodeSharePayload,
@@ -564,6 +566,7 @@ export default function App() {
   const [showAutopilot, setShowAutopilot] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
   const [showGithubImport, setShowGithubImport] = useState(false)
+  const [showDemo, setShowDemo] = useState(false)
   const [projectsRevision, setProjectsRevision] = useState(0)
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() =>
     getActiveWorkspaceId(),
@@ -1052,6 +1055,7 @@ export default function App() {
       else if (showAutopilot) setShowAutopilot(false)
       else if (showCouncil) setShowCouncil(false)
       else if (showVision) setShowVision(false)
+      else if (showDemo) setShowDemo(false)
       else if (showGallery) setShowGallery(false)
       else if (showPolish) setShowPolish(false)
       else if (showShip) setShowShip(false)
@@ -1068,6 +1072,7 @@ export default function App() {
     showCouncil,
     showVision,
     showGallery,
+    showDemo,
     showPolish,
     showShip,
     showSettings,
@@ -1950,8 +1955,9 @@ export default function App() {
     saveAs(blob, `${appSlug}.zip`)
     recordUsage('ship')
     setUsageTick((n) => n + 1)
+    track('ship_zip', { slug: appSlug })
     toast.success('Production ZIP ready', {
-      description: 'Next.js + Supabase + Vercel + multi-model polish packs',
+      description: 'Next.js + Supabase + Vercel · secrets stripped · see EXPORT_QUALITY.md',
     })
   }
 
@@ -2159,7 +2165,10 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setShowGallery(true)}
+            onClick={() => {
+              track('gallery_open')
+              setShowGallery(true)
+            }}
             className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35 transition-colors"
             title="Remix gallery"
           >
@@ -2168,7 +2177,19 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setShowPricing(true)}
+            onClick={() => setShowDemo(true)}
+            className="hidden md:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-[#1f1f27] text-[12px] text-[#888] hover:text-[#fa0] hover:border-[#fa0]/35 transition-colors"
+            title="30-second demo"
+          >
+            <Sparkles size={14} />
+            Demo
+          </button>
+
+          <button
+            onClick={() => {
+              track('pricing_open')
+              setShowPricing(true)
+            }}
             className={`hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border text-[12px] transition-colors ${
               planId === 'free'
                 ? 'border-[#1f1f27] text-[#888] hover:text-[#00ff88] hover:border-[#00ff88]/35'
@@ -2183,7 +2204,10 @@ export default function App() {
             )}
           </button>
           <button
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              track('settings_open')
+              setShowSettings(true)
+            }}
             className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-[#1f1f27] text-[#777] hover:text-[#ccc] hover:border-[#333] transition-colors"
             aria-label="Settings"
           >
@@ -3105,7 +3129,15 @@ export default function App() {
         onImported={handleGithubImport}
       />
 
-      <GalleryPanel
+      <DemoLaunchPanel
+        open={showDemo}
+        onClose={() => setShowDemo(false)}
+        onStartVoice={() => {
+          setMobilePanel('chat')
+        }}
+      />
+
+<GalleryPanel
         open={showGallery}
         onClose={() => setShowGallery(false)}
         onRemix={handleGalleryRemix}

@@ -20,6 +20,7 @@ import {
   Cloud,
   FolderGit2,
   Share2,
+  Globe2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -34,6 +35,8 @@ import {
 } from '../lib/projects'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { copyShareLink } from '../lib/share-link'
+import { publishToGallery } from '../lib/gallery'
+import { track } from '../lib/analytics'
 
 type FilterTab = 'all' | WorkspaceStatus
 
@@ -121,6 +124,7 @@ export function ProjectsLibraryPanel({
     e.stopPropagation()
     try {
       const { truncated } = await copyShareLink(ws)
+      track('share_copy', { source: 'projects', id: ws.id })
       toast.success('Share link copied', {
         description: truncated
           ? 'Plan + chat included (files too large for URL — open on this device for full preview).'
@@ -128,6 +132,23 @@ export function ProjectsLibraryPanel({
       })
     } catch {
       toast.error('Could not copy share link')
+    }
+  }
+
+  const handlePublish = (ws: SavedWorkspace, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      const entry = publishToGallery(ws, {
+        featured: ws.status === 'built',
+        previewThumb:
+          'linear-gradient(135deg, rgba(0,255,136,0.35), #0a0a0f 60%)',
+      })
+      track('gallery_publish', { id: entry.id, name: entry.name, status: ws.status })
+      toast.success(`Published “${entry.name}”`, {
+        description: 'In Remix Gallery on this device — Share to send a portable link.',
+      })
+    } catch {
+      toast.error('Could not publish to gallery')
     }
   }
 
@@ -371,6 +392,15 @@ export function ProjectsLibraryPanel({
                             title="Copy shareable link"
                           >
                             <Share2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handlePublish(ws, e)}
+                            className="p-1.5 rounded-lg text-[#555] hover:text-[#fa0] hover:bg-[#fa0]/10"
+                            aria-label={`Publish ${ws.name} to gallery`}
+                            title="Publish to Remix Gallery"
+                          >
+                            <Globe2 size={14} />
                           </button>
                           <button
                             type="button"

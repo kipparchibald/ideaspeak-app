@@ -10,6 +10,8 @@ import {
   type ProjectFile,
 } from './projects'
 import { buildWorldClassPreview, type PreviewFiles } from './preview-scaffold'
+import { copyShareLink } from './share-link'
+
 
 export interface GalleryEntry {
   id: string
@@ -398,4 +400,21 @@ export function publishToGallery(
   all.unshift(entry)
   writeAll(all)
   return toPublicEntry(entry)
+}
+
+/** Build a portable share URL for a gallery entry (uses workspace share payload). */
+export async function shareGalleryEntry(entry: GalleryEntry | string): Promise<{ url: string; truncated: boolean } | null> {
+  const id = typeof entry === 'string' ? entry : entry.id
+  const row = readAll().find((e) => e.id === id)
+  if (!row) return null
+  return copyShareLink(row.workspace)
+}
+
+/** Unpublish / remove a user-published gallery entry (won't remove demo seeds with featured+demo ids). */
+export function unpublishFromGallery(id: string): boolean {
+  const all = readAll()
+  const next = all.filter((e) => e.id !== id)
+  if (next.length === all.length) return false
+  writeAll(next)
+  return true
 }
