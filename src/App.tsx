@@ -31,7 +31,8 @@ import { toast, Toaster } from 'sonner'
 import { discussWithGrok, generateWithLLM } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import { verifyXaiKey, loadLocalXaiKey as loadKey } from './lib/api-verify'
-import { simulateVoiceRefiner } from './lib/build-tools'
+import { simulateVoiceRefiner, prepareExportPreviewFiles, validateExportScaffold } from './lib/build-tools'
+import { formatUserFacingApiError, stripRequestRef } from './lib/api-errors'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { ModeBadge, type GrokMode } from './components/ModeBadge'
@@ -1410,7 +1411,12 @@ export default function App() {
             progress.note('Grok output was not runnable — falling back to instant scaffold…', 'Builder')
           } else {
             progress.note('Grok build timed out — falling back to instant scaffold…', 'Builder')
+            toast.message('Grok Build timed out', {
+              description: 'Showing high-fidelity simulator preview. Retry or check Settings.',
+            })
           }
+        } else if (!key) {
+          progress.note('No Grok key — using simulator templates (Settings → add key for Grok Build)', 'Builder')
         }
 
         const themed = buildWorldClassPreview({
@@ -1444,6 +1450,23 @@ export default function App() {
           }
         }
         console.error(e)
+        const errMsg = formatUserFacingApiError(e, 'Build failed')
+        const hadKey = !!(key || apiKey)
+        if (hadKey && !(e instanceof Error && e.message === 'NO_KEY')) {
+          void progress.fail(stripRequestRef(errMsg))
+          toast.error('Grok Build failed', {
+            description: errMsg,
+            action: { label: 'Settings', onClick: () => setShowSettings(true) },
+          })
+          buildInFlightRef.current = false
+          setIsBuilding(false)
+          setIsUpgrading(false)
+          return {
+            plan: lastBuildPlan || 'Build failed — try again.',
+            name: lastBuiltName || 'Your app',
+            source: 'local' as const,
+          }
+        }
         const fallback = buildWorldClassPreview({
           vision: idea,
           original: idea,
@@ -1639,7 +1662,9 @@ export default function App() {
               timestamp: Date.now(),
             },
           ])
-          toast.error(activeMode === 'build' ? 'Build failed' : 'Could not reach the agent')
+          toast.error(activeMode === 'build' ? 'Build failed' : 'Could not reach the agent', {
+            description: formatUserFacingApiError(err, 'Try again or check Settings'),
+          })
         }
       } finally {
         setIsLoading(false)
@@ -1958,11 +1983,16 @@ export default function App() {
         .map((m) => m.content)
         .join(' · ')
 
+    const previewFlat = prepareExportPreviewFiles(generatedFiles, {
+      vision: idea,
+      original: idea,
+    })
+
     const scaffold = buildProductionScaffold({
       appName,
       appSlug,
       idea,
-      previewFiles: generatedFiles,
+      previewFiles: previewFlat,
       prefs: prefs || {
         appName,
         appSlug,
@@ -1973,6 +2003,14 @@ export default function App() {
         checklist: {},
       },
     })
+
+    const missing = validateExportScaffold(scaffold)
+    if (missing.length) {
+      toast.error('Export blocked — scaffold incomplete', {
+        description: `Missing: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ` +${missing.length - 4} more` : ''}`,
+      })
+      throw new Error('EXPORT_INCOMPLETE')
+    }
 
     const zip = new JSZip()
     Object.entries(scaffold).forEach(([path, content]) => {
@@ -2094,7 +2132,7 @@ export default function App() {
             </div>
           </div>
           <div className="ml-0.5 sm:ml-1 shrink-0">
-            <ModeBadge mode={grokMode} compact />
+            <ModeBadge mode={grokMode} compact onOpenSettings={() => setShowSettings(true)} />
           </div>
           {/* Compact mic status */}
           <div
@@ -2260,12 +2298,12 @@ export default function App() {
             className="flex-1 text-left text-[12px] text-[#fa0] hover:underline"
           >
             <span className="font-medium">
-              {apiKey ? 'Grok key not working' : 'Simulator mode'}
+              {apiKey ? 'Grok key not working — simulator active' : 'Simulator mode — not live Grok'}
             </span>
             <span className="text-[#fa0]/70">
               {apiKey
-                ? ` — ${grokStatusMsg || 'rejected by xAI'}. Paste a new key from console.x.ai →`
-                : ' — add a free Grok key in Settings for real co-founder voice →'}
+                ? ` — ${grokStatusMsg || 'rejected by xAI'}. Paste a fresh key from console.x.ai →`
+                : ' — local templates only. Add your free Grok key in Settings for real planning + Grok Build →'}
             </span>
           </button>
           <button

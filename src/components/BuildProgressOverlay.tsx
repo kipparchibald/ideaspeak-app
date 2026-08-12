@@ -70,6 +70,11 @@ export function BuildProgressOverlay({
               <p className="text-base sm:text-lg font-medium leading-snug text-[#e8e8f0]">
                 {progress.headline || 'Preparing your build…'}
               </p>
+              {isError && progress.errorDetail && (
+                <p className="mt-2 text-[12px] text-red-300/90 leading-relaxed break-words">
+                  {progress.errorDetail}
+                </p>
+              )}
             </div>
           </div>
         </div>

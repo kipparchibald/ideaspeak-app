@@ -351,7 +351,8 @@ await step('POST /api/ship queue + stub poll', async () => {
 })
 
 await step('Unit: production ship scaffold', async () => {
-  const { buildProductionScaffold, vercelOneClickDeployUrl } = await import('../src/lib/ship.ts')
+    const { buildProductionScaffold, vercelOneClickDeployUrl } = await import('../src/lib/ship.ts')
+    const { validateExportScaffold } = await import('../src/lib/build-tools.ts')
   const files = buildProductionScaffold({
     appName: 'Smoke App',
     appSlug: 'smoke-app',
@@ -394,6 +395,8 @@ await step('Unit: production ship scaffold', async () => {
   if (!withRepo.includes('repository-url=') || !withRepo.includes('github.com')) {
     throw new Error(`repo deploy URL bad: ${withRepo}`)
   }
+  const missing = validateExportScaffold(files)
+  if (missing.length) throw new Error(`export quality gaps: ${missing.join(', ')}`)
   return `${Object.keys(files).length} files · deploy button ok`
 })
 

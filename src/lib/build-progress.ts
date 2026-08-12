@@ -16,6 +16,8 @@ export interface BuildProgressSnapshot {
   phase: BuildPhase
   log: BuildLogEntry[]
   kind: BuildJobKind | null
+  /** Shown under headline when phase === 'error' */
+  errorDetail?: string
 }
 
 export interface BuildProgressContext {
@@ -256,7 +258,8 @@ export class BuildProgressSession {
   async fail(message: string): Promise<void> {
     this.stopTicker()
     this.phase('error')
-    this.headline(`Build hit a snag — ${message}`)
+    this.snap.errorDetail = message
+    this.headline('Build hit a snag')
     this.push(`Error: ${message}`, 'IdeaSpeak')
     await new Promise((r) => setTimeout(r, 2800))
   }

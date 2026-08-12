@@ -13,7 +13,7 @@ import type {
   ProjectFile,
 } from './projects'
 import { buildWorldClassPreview, sanitizePreviewFiles } from './preview-scaffold'
-import { buildProductionScaffold, EXPORT_SCAFFOLD_CHECKLIST } from './ship'
+import { buildProductionScaffold, EXPORT_QUALITY_PATHS, EXPORT_SCAFFOLD_CHECKLIST } from './ship'
 
 export type NativeBuildTool =
   | 'plan'
@@ -184,7 +184,8 @@ export function buildExportScaffoldFromContext(
 
 /** Quick validation — returns missing required scaffold paths */
 export function validateExportScaffold(files: Record<string, string>): string[] {
-  return EXPORT_SCAFFOLD_CHECKLIST.filter((path) => !files[path]?.trim())
+  const required = [...EXPORT_SCAFFOLD_CHECKLIST, ...EXPORT_QUALITY_PATHS]
+  return required.filter((path) => !files[path]?.trim())
 }
 
 export function resolveExportProject(ctx: WorkspaceBuildContext): CurrentProject | null {

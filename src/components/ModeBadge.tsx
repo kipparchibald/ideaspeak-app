@@ -10,14 +10,29 @@ interface ModeBadgeProps {
   hasApiKey?: boolean
   mode?: GrokMode
   compact?: boolean
+  onOpenSettings?: () => void
 }
 
-export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) {
+export function ModeBadge({ hasApiKey, mode, compact = false, onOpenSettings }: ModeBadgeProps) {
   const liveTitle =
-    'Plan: Grok 4.5 · Build: grok-build-0.1 (~3× cheaper codegen than 4.5, purpose-built)'
+    'Real Grok — Plan: Grok 4.5 · Build: grok-build-0.1. Voice, discuss, and codegen hit xAI.'
 
-  const resolved: GrokMode =
-    mode ?? (hasApiKey ? 'live' : 'simulator')
+  const resolved: GrokMode = mode ?? (hasApiKey ? 'live' : 'simulator')
+
+  const settingsHint = onOpenSettings ? (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onOpenSettings()
+      }}
+      className="underline underline-offset-2 opacity-80 hover:opacity-100"
+    >
+      Settings
+    </button>
+  ) : (
+    'Settings'
+  )
 
   if (resolved === 'live') {
     return (
@@ -48,7 +63,7 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
         />
         Real Grok
         {!compact && (
-          <span style={{ opacity: 0.75, fontWeight: 600 }}>· Build</span>
+          <span style={{ opacity: 0.75, fontWeight: 600 }}>· live API</span>
         )}
       </span>
     )
@@ -70,7 +85,7 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
           alignItems: 'center',
           gap: 5,
         }}
-        title="Key saved but rejected by xAI. Open Settings → paste a fresh key from console.x.ai."
+        title={`Key saved but xAI rejected it. Open ${typeof settingsHint === 'string' ? 'Settings' : 'Settings'} → paste a fresh key from console.x.ai.`}
       >
         <span
           style={{
@@ -80,7 +95,8 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
             background: '#f66',
           }}
         />
-        Key missing
+        Key invalid
+        {!compact && <span style={{ opacity: 0.7, fontWeight: 600 }}>· simulator</span>}
       </span>
     )
   }
@@ -100,7 +116,7 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
         alignItems: 'center',
         gap: 5,
       }}
-      title="Not talking to live Grok. Open Settings → paste a valid key from console.x.ai (Save & Verify must say Connected)."
+      title="Simulator — high-fidelity local templates. Add a Grok key in Settings for real planning + Grok Build codegen."
     >
       <span
         style={{
@@ -111,6 +127,7 @@ export function ModeBadge({ hasApiKey, mode, compact = false }: ModeBadgeProps) 
         }}
       />
       Simulator
+      {!compact && <span style={{ opacity: 0.7, fontWeight: 600 }}>· no API</span>}
     </span>
   )
 }

@@ -12,6 +12,12 @@
 
 ## Current Score: **9.7 / 10**
 
+### Done recently (August 12 publish polish · continued)
+- **Export hardening** — `validateExportScaffold` blocks incomplete ZIPs; quality paths (`.cursorrules`, `vercel.json`, `EXPORT_QUALITY.md`, `SHIP.md`); preview files sanitized before export
+- **Error UX** — build overlay shows `errorDetail`; Grok failures surface ref IDs + Settings action; simulator fallback only when no key
+- **Simulator clarity** — ModeBadge labels (`Simulator · no API`, `Key invalid`, `Real Grok · live API`); banner copy distinguishes local templates vs live Grok
+- **Voice token observability** — `/api/voice-token` returns `requestId` on errors
+
 ### Done recently (August 12 production hardening)
 - **Observability** — structured `generation_failed` JSON logs with `X-Request-Id` on `/api/build`, `/api/discuss`, `/api/refine` (Vercel edge + Railway Bun server)
 - **Bug fix** — Bun server `/api/discuss` route was unreachable (string typo in pathname check)
