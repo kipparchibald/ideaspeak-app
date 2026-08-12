@@ -3,7 +3,7 @@
 **Goal:** Make IdeaSpeak the best "build and test in one app" experience — speak an idea, see a live preview, refine by voice, ship.
 
 **Live Demo:** https://ideaspeak-app.vercel.app  
-**Last updated:** July 30, 2026
+**Last updated:** August 12, 2026
 
 ---
 
@@ -46,7 +46,7 @@
 
 - [x] E2B client + server manager wired (`E2B_API_KEY` enables real; graceful stub without)
 - [x] Rate limiting + basic abuse protection on API routes (`api/security.js` — per-IP fixed window on build/discuss/refine)
-- [ ] Better observability / logging for failed generations (structured request IDs)
+- [x] Better observability / logging for failed generations (structured request IDs)
 - [x] Environment variable validation on boot (`server/index.ts` validateEnv)
 - [ ] Railway Bun server deployed + monitored (`/health` in production)
 - [ ] Auth (optional for demo, required for multi-user)

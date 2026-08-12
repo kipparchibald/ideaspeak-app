@@ -7,6 +7,12 @@ import {
   shouldRateLimit,
 } from '../api/security.js'
 import { parseJsonFromContent } from '../api/xai.js'
+import {
+  bunErrorJson,
+  getOrCreateRequestId,
+  lastUserMessage,
+  requestIdHeaders,
+} from '../api/observability.js'
 import { PREVIEW_ENTRY_MAIN } from '../src/lib/preview-scaffold.ts'
 
 // Load local secrets (Bun auto-loads .env; also try .env.local)
@@ -142,7 +148,8 @@ const server = serve({
   port: SERVER_PORT,
   async fetch(req) {
     const url = new URL(req.url)
-    const headers = corsHeaders(req)
+    const requestId = getOrCreateRequestId(req)
+    const headers = { ...corsHeaders(req), ...requestIdHeaders(requestId) }
 
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers })
@@ -393,7 +400,8 @@ const server = serve({
     }
 
     if (url.pathname === '/api/refine' && req.method === 'POST') {
-      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
+      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key', requestId }, { status: 401, headers })
+      const startedAt = Date.now()
       try {
         const { transcript, history = [] } = await req.json()
         const refinerPrompt = await loadPrompt('IdeaSpeak-Voice-Refiner-Prompt.md')
@@ -401,14 +409,23 @@ const server = serve({
         const user = `Raw transcript: ${transcript}\nHistory: ${history.slice(-2).map((h: any) => h.content).join(' | ')}`
         const content = await callXaiProxy([{ role: 'system', content: system }, { role: 'user', content: user }], apiKey)
         const parsed = parseJsonFromContent(content)
-        return Response.json({ content, parsed }, { headers })
+        return Response.json({ content, parsed, requestId }, { headers })
       } catch (e: any) {
-        return Response.json({ error: e.message }, { status: 500, headers })
+        return bunErrorJson(req, headers, {
+          requestId,
+          status: 500,
+          error: e.message,
+          route: '/api/refine',
+          kind: 'refine',
+          durationMs: Date.now() - startedAt,
+        })
       }
     }
 
     if (url.pathname === '/api/build' && req.method === 'POST') {
-      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
+      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key', requestId }, { status: 401, headers })
+      const startedAt = Date.now()
+      let buildUser = ''
       try {
         const { transcript, brief: inputBrief, personality = 'grok' } = await req.json()
         const personalityNote =
@@ -421,7 +438,7 @@ const server = serve({
                 : personality === 'rebel'
                   ? ' Bold unconventional UI choices.'
                   : ''
-        const user = inputBrief
+        buildUser = inputBrief
           ? `Build production v1 from this plan and brief:
 ${transcript || ''}
 
@@ -431,7 +448,7 @@ ${transcript || ''}`
         const { callGrokBuild } = await import('../api/grok-build.js')
         const result = await callGrokBuild(apiKey, {
           system: BUILD_SYSTEM + personalityNote,
-          user,
+          user: buildUser,
           maxTokens: 12000,
           temperature: 0.4,
         })
@@ -449,16 +466,26 @@ ${transcript || ''}`
             model: result.model,
             api: result.api,
             engine: 'grok-build',
+            requestId,
           },
           { headers },
         )
       } catch (e: any) {
-        return Response.json({ error: e.message }, { status: 500, headers })
+        return bunErrorJson(req, headers, {
+          requestId,
+          status: 500,
+          error: e.message,
+          route: '/api/build',
+          kind: 'build',
+          transcript: buildUser,
+          durationMs: Date.now() - startedAt,
+        })
       }
     }
 
-    if (url.pathname === '/api/discuss && req.method === 'POST') {
-      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key' }, { status: 401, headers })
+    if (url.pathname === '/api/discuss' && req.method === 'POST') {
+      if (!apiKey) return Response.json({ error: 'Missing X-AI-Key', requestId }, { status: 401, headers })
+      const startedAt = Date.now()
       try {
         const { messages, image, personality = 'grok', voiceMode } = await req.json()
         // Shared Grok-native prompt (same as Vercel edge)
@@ -488,17 +515,27 @@ ${transcript || ''}`
         let content = raw
         if (isVoice) content = humanizeVoiceReply(content)
         if (!content) {
-          return Response.json(
-            { error: 'Empty model response', content: '' },
-            { status: 502, headers },
-          )
+          return bunErrorJson(req, headers, {
+            requestId,
+            status: 502,
+            error: 'Empty model response',
+            route: '/api/discuss',
+            kind: 'discuss',
+            sample: lastUserMessage(messages),
+            messageCount: messages?.length ?? 0,
+            durationMs: Date.now() - startedAt,
+          })
         }
-        return Response.json({ content }, { headers })
+        return Response.json({ content, requestId }, { headers })
       } catch (e: any) {
-        return Response.json(
-          { error: e?.message || 'Discuss failed', content: '' },
-          { status: 500, headers },
-        )
+        return bunErrorJson(req, headers, {
+          requestId,
+          status: 500,
+          error: e?.message || 'Discuss failed',
+          route: '/api/discuss',
+          kind: 'discuss',
+          durationMs: Date.now() - startedAt,
+        })
       }
     }
 

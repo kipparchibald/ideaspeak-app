@@ -36,12 +36,15 @@ import {
 } from './smoke-helpers.mjs'
 
 const isLocalArg = process.argv.includes('--local') || process.env.BASE_URL?.includes('localhost')
+const DEFAULT_LOCAL = 'http://localhost:8080'
 const BASE =
   process.env.BASE_URL ||
   (isLocalArg || process.argv.includes('--local')
-    ? 'http://localhost:5173'
+    ? DEFAULT_LOCAL
     : 'https://ideaspeak-app.vercel.app')
-const API = BASE.includes('localhost:5173') ? 'http://localhost:3001' : BASE
+const isLocalHost =
+  BASE.includes('localhost') || BASE.includes('127.0.0.1') || process.argv.includes('--local')
+const API = process.env.API_URL || (isLocalHost ? 'http://localhost:3001' : BASE)
 const RUN_BUILD = process.argv.includes('--build')
 const REQUIRE_LIVE = process.argv.includes('--require-live') || process.env.REQUIRE_LIVE === '1'
 const RUN_SECURITY = !process.argv.includes('--no-security')
@@ -117,7 +120,7 @@ if (RUN_SECURITY) {
   await step('Security: usage API returns JSON', async () => {
     const res = await fetch(`${API}/api/usage`, {
       headers: {
-        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+        Origin: API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app',
       },
       signal: AbortSignal.timeout(10_000),
     })
@@ -125,6 +128,40 @@ if (RUN_SECURITY) {
     if (!data.limits || !data.usage) throw new Error('usage shape invalid')
     return `authoritative=${!!data.authoritative} plan=${data.plan}`
   })
+
+  await step('Observability: requestId module', async () => {
+    const { createRequestId, hashForLog, jsonErrorBody } = await import('../api/observability.js')
+    const id = createRequestId()
+    if (!id || id.length < 8) throw new Error('createRequestId too short')
+    const hash = await hashForLog('smoke probe transcript')
+    if (!hash) throw new Error('hashForLog empty')
+    const body = jsonErrorBody({ requestId: id, error: 'probe' })
+    if (body.requestId !== id) throw new Error('jsonErrorBody mismatch')
+    return `id=${id.slice(0, 8)}… hash=${hash}`
+  })
+
+  await step(
+    'Observability: API error returns requestId',
+    async () => {
+      if (grokLive) throw new Error('Grok live — 401 path not exercised')
+      const origin = API.includes('localhost')
+        ? 'http://localhost:8080'
+        : 'https://ideaspeak-app.vercel.app'
+      const res = await fetch(`${API}/api/discuss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: origin },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'observability probe' }],
+        }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      const data = await res.json()
+      const hdr = res.headers.get('x-request-id') || res.headers.get('X-Request-Id')
+      if (!data.requestId && !hdr) throw new Error('missing requestId on error response')
+      return `status=${res.status} ref=${(data.requestId || hdr || '').slice(0, 8)}`
+    },
+    { optional: !isLocalHost },
+  )
 }
 
 await step(
@@ -135,7 +172,7 @@ await step(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+        Origin: API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app',
       },
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'I want a voice memo app that turns rants into tasks' }],
@@ -163,7 +200,7 @@ await step(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+        Origin: API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app',
       },
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'Scope a v1 for a founder habit tracker' }],
@@ -186,7 +223,7 @@ await step(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+        Origin: API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app',
       },
       body: JSON.stringify({
         transcript:
@@ -212,7 +249,7 @@ if (RUN_BUILD) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Origin: API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app',
+          Origin: API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app',
         },
         body: JSON.stringify({
           transcript: 'Minimal todo app with premium dark UI and voice add',
@@ -278,7 +315,7 @@ await step('Unit: discuss simulator fallback (mocked network)', async () => {
 
 await step('POST /api/ship queue + stub poll', async () => {
   const slug = `smoke-e2e-${Date.now()}`
-  const origin = API.includes('localhost') ? 'http://localhost:5173' : 'https://ideaspeak-app.vercel.app'
+  const origin = API.includes('localhost') ? 'http://localhost:8080' : 'https://ideaspeak-app.vercel.app'
   const postRes = await fetch(`${API}/api/ship`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin },

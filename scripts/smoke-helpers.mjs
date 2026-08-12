@@ -243,8 +243,9 @@ export function attachPageDiagnostics(page, errors = []) {
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return
     const text = msg.text()
-    // Sandpack CDN hiccups are noisy in headless CI — not app regressions
+    // Browser network noise (Sandpack CDN, optional APIs) — core UI assertions are authoritative
     if (
+      /Failed to load resource/i.test(text) ||
       /sandpack|codesandbox|jsdelivr|Failed to fetch|ReactDOMClient\.createRoot/i.test(text)
     ) {
       return

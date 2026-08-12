@@ -33,12 +33,12 @@ jobs:
         run: bun run server &
 
       - name: Start preview server
-        run: bun run preview -- --port 5173 --host &
+        run: bun run preview -- --port 8080 --host &
 
       - name: Wait for servers
         run: |
           for i in $(seq 1 45); do
-            if curl -sf http://localhost:3001/health >/dev/null && curl -sf http://localhost:5173 >/dev/null; then
+            if curl -sf http://localhost:3001/health >/dev/null && curl -sf http://localhost:8080 >/dev/null; then
               echo "Servers ready"
               exit 0
             fi

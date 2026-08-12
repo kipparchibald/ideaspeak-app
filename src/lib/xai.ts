@@ -120,7 +120,9 @@ export async function generateWithLLM(
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || `Build failed (${res.status})`);
+      const rid = data.requestId || res.headers.get('x-request-id') || res.headers.get('X-Request-Id');
+      const base = data.error || `Build failed (${res.status})`;
+      throw new Error(rid ? `${base} (ref: ${String(rid).slice(0, 8)})` : base);
     }
 
     if (data.parsed && data.parsed.files) {
@@ -187,15 +189,19 @@ export async function discussWithGrok(
     const data = await res.json().catch(() => ({} as any))
 
     if (!res.ok) {
+      const hdrGet =
+        typeof res.headers?.get === 'function' ? res.headers.get.bind(res.headers) : () => null
+      const rid = data?.requestId || hdrGet('X-Request-Id') || hdrGet('x-request-id')
       const errMsg =
         (typeof data?.error === 'string' && data.error) ||
         data?.error?.message ||
         `Discuss failed (${res.status})`
-      console.warn('Discuss API error:', errMsg)
+      const ref = rid ? ` (ref: ${String(rid).slice(0, 8)})` : ''
+      console.warn('Discuss API error:', errMsg, rid || '')
       return {
         content: simulateDiscuss(messages, personality, !!voiceMode),
         live: false,
-        error: errMsg,
+        error: errMsg + ref,
       }
     }
 

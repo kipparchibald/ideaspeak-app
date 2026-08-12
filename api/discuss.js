@@ -1,12 +1,22 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 import { chatCompletion, getApiKey, xaiError } from './xai.js'
 import { corsHeaders, rejectBlockedOrigin, enforceRateLimit } from './security.js'
+import {
+  edgeErrorResponse,
+  getOrCreateRequestId,
+  lastUserMessage,
+  requestIdHeaders,
+} from './observability.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
 export default async function handler(req) {
+  const requestId = getOrCreateRequestId(req)
+  const startedAt = Date.now()
+  const baseHeaders = { ...corsHeaders(req), ...requestIdHeaders(requestId) }
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(req) })
+    return new Response(null, { status: 204, headers: baseHeaders })
   }
 
   const blocked = rejectBlockedOrigin(req)
@@ -17,10 +27,13 @@ export default async function handler(req) {
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Grok API not configured on server' }), {
-      status: 401,
-      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
-    })
+    return new Response(
+      JSON.stringify({ error: 'Grok API not configured on server', requestId }),
+      {
+        status: 401,
+        headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+      },
+    )
   }
 
   const { messages, image, personality = 'grok', voiceMode } = await req.json()
@@ -42,7 +55,7 @@ export default async function handler(req) {
     }
   }
 
-  const { ok, data } = await chatCompletion(apiKey, {
+  const { ok, status, data } = await chatCompletion(apiKey, {
     messages: fullMessages,
     temperature: isVoice ? 0.95 : 0.85,
     maxTokens: isVoice ? 180 : 1200,
@@ -50,9 +63,17 @@ export default async function handler(req) {
   })
 
   if (!ok) {
-    return new Response(JSON.stringify({ error: xaiError(data) }), {
+    return edgeErrorResponse(req, corsHeaders, {
+      requestId,
       status: 500,
-      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      error: xaiError(data),
+      route: '/api/discuss',
+      kind: 'discuss',
+      sample: lastUserMessage(messages),
+      messageCount: messages?.length ?? 0,
+      xaiStatus: status,
+      rateHeaders,
+      durationMs: Date.now() - startedAt,
     })
   }
 
@@ -68,19 +89,20 @@ export default async function handler(req) {
   }
 
   if (!content) {
-    return new Response(
-      JSON.stringify({
-        error: 'Empty model response — try again or check model access',
-        content: '',
-      }),
-      {
-        status: 502,
-        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
-      },
-    )
+    return edgeErrorResponse(req, corsHeaders, {
+      requestId,
+      status: 502,
+      error: 'Empty model response — try again or check model access',
+      route: '/api/discuss',
+      kind: 'discuss',
+      sample: lastUserMessage(messages),
+      messageCount: messages?.length ?? 0,
+      rateHeaders,
+      durationMs: Date.now() - startedAt,
+    })
   }
 
-  return new Response(JSON.stringify({ content, voiceMode: !!voiceMode }), {
-    headers: { ...corsHeaders(req), ...rateHeaders, 'Content-Type': 'application/json' },
+  return new Response(JSON.stringify({ content, voiceMode: !!voiceMode, requestId }), {
+    headers: { ...baseHeaders, ...rateHeaders, 'Content-Type': 'application/json' },
   })
 }
