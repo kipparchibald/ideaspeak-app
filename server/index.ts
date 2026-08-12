@@ -120,8 +120,10 @@ async function callXaiProxy(
     temperature: opts.temperature ?? 0.85,
     max_tokens: opts.maxTokens ?? 800,
   }
-  if (opts.reasoningEffort && String(model).includes('grok-4')) {
-    body.reasoning_effort = opts.reasoningEffort
+  const effort =
+    opts.reasoningEffort === 'none' ? 'low' : opts.reasoningEffort
+  if (effort && String(model).includes('grok-4')) {
+    body.reasoning_effort = effort
   }
   const res = await fetch(XAI_API, {
     method: 'POST',

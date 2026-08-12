@@ -23,7 +23,7 @@ Open [ideaspeak-app.vercel.app](https://ideaspeak-app.vercel.app) → **Begin vo
 
 ### 2. Build with Grok
 
-- **Discuss** uses `grok-4.3` (fast, `reasoning_effort: none` in voice).
+- **Discuss** uses `grok-4.5` (fast, `reasoning_effort: low` for voice + text).
 - **Build** uses `grok-build-0.1` (agentic coding).
 - Live Sandpack preview updates as you refine.
 
