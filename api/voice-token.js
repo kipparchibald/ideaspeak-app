@@ -1,20 +1,27 @@
 import { getApiKey } from './xai.js'
 import { corsHeaders, rejectBlockedOrigin } from './security.js'
+import { edgeErrorResponse, getOrCreateRequestId, requestIdHeaders } from './observability.js'
 
 export const config = { runtime: 'edge', maxDuration: 30 }
 
 export default async function handler(req) {
+  const requestId = getOrCreateRequestId(req)
+  const baseHeaders = { ...corsHeaders(req), ...requestIdHeaders(requestId) }
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(req) })
+    return new Response(null, { status: 204, headers: baseHeaders })
   }
   const blocked = rejectBlockedOrigin(req)
   if (blocked) return blocked
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'XAI_API_KEY not configured' }), {
-      status: 401,
-      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
-    })
+    return new Response(
+      JSON.stringify({ error: 'XAI_API_KEY not configured', requestId }),
+      {
+        status: 401,
+        headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+      },
+    )
   }
   try {
     const res = await fetch('https://api.x.ai/v1/realtime/client_secrets', {
@@ -24,13 +31,16 @@ export default async function handler(req) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error?.message || 'Token fetch failed')
-    return new Response(JSON.stringify(data), {
-      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ ...data, requestId }), {
+      headers: { ...baseHeaders, 'Content-Type': 'application/json' },
     })
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
+    return edgeErrorResponse(req, corsHeaders, {
+      requestId,
       status: 500,
-      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      error: e.message,
+      route: '/api/voice-token',
+      kind: 'voice-token',
     })
   }
 }

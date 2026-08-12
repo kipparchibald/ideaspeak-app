@@ -427,6 +427,15 @@ export const EXPORT_SCAFFOLD_CHECKLIST = [
   'IDEA-SPEAK-CONTEXT.md',
 ] as const
 
+/** Extra paths that signal a complete IdeaSpeak ship bundle */
+export const EXPORT_QUALITY_PATHS = [
+  '.cursorrules',
+  'vercel.json',
+  'SHIP.md',
+  'EXPORT_QUALITY.md',
+  '.gitignore',
+] as const
+
 const PREVIEW_ENTRY_SKIP = new Set([
   'package.json',
   'src/main.tsx',

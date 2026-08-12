@@ -6,11 +6,22 @@
 
 **Not this product:** SummitForge RE OS is a separate real-estate app in its own repo (`SummitForge-RE-OS`). Do not mix code, status, or scope.
 
-**Last updated:** July 30, 2026
+**Last updated:** August 12, 2026
 
 ---
 
 ## Current Score: **9.7 / 10**
+
+### Done recently (August 12 publish polish · continued)
+- **Export hardening** — `validateExportScaffold` blocks incomplete ZIPs; quality paths (`.cursorrules`, `vercel.json`, `EXPORT_QUALITY.md`, `SHIP.md`); preview files sanitized before export
+- **Error UX** — build overlay shows `errorDetail`; Grok failures surface ref IDs + Settings action; simulator fallback only when no key
+- **Simulator clarity** — ModeBadge labels (`Simulator · no API`, `Key invalid`, `Real Grok · live API`); banner copy distinguishes local templates vs live Grok
+- **Voice token observability** — `/api/voice-token` returns `requestId` on errors
+
+### Done recently (August 12 production hardening)
+- **Observability** — structured `generation_failed` JSON logs with `X-Request-Id` on `/api/build`, `/api/discuss`, `/api/refine` (Vercel edge + Railway Bun server)
+- **Bug fix** — Bun server `/api/discuss` route was unreachable (string typo in pathname check)
+- **Smoke** — local API URL detection fixed (`localhost:8080` → Bun `:3001`); CI preview port aligned to 8080
 
 ### Done recently (July 30 full ship pass)
 - **Grok Build** — `/api/build` uses `grok-build-0.1` via Responses API (+ `grok-4.5` fallback); UI + progress surface Grok Build
@@ -60,12 +71,13 @@
 | 6 Launch | ⏳ Analytics, legal, demo video |
 
 ### Next (Sprint 6 + hardening)
-1. Deploy Railway with `XAI_API_KEY` + `E2B_API_KEY` + `STRIPE_*`
-2. Supabase project + run `supabase/schema.sql`
-3. Stripe test-mode E2E → production keys
+1. Deploy Railway with `XAI_API_KEY` + `E2B_API_KEY` + `STRIPE_*` (owner: Kipp)
+2. Supabase project + run `supabase/schema.sql` (owner: Kipp)
+3. Stripe test-mode E2E → production keys (owner: Kipp)
 4. Launch video + analytics (Plausible/PostHog)
 5. Optional: cloud-backed share links (today are portable URL payloads)
 6. Sprint 0.5: branch protection on `main` (repo settings)
+7. Error tracking (Sentry) + status page
 
 ---
 

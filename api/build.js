@@ -2,13 +2,16 @@ import { BUILD_SYSTEM } from './build-prompt.js'
 import { getApiKey, parseJsonFromContent } from './xai.js'
 import { callGrokBuild, GROK_BUILD_MODEL } from './grok-build.js'
 import { corsHeaders, isAllowedOrigin, rejectRateLimitedNode } from './security.js'
+import { getOrCreateRequestId, nodeErrorJson, requestIdHeaders } from './observability.js'
 
 /** Node runtime — Grok Build can take 60–120s; Edge times out */
 export const config = { maxDuration: 120 }
 
 export default async function handler(req, res) {
+  const requestId = getOrCreateRequestId(req)
+  const startedAt = Date.now()
   const cors = corsHeaders(req)
-  for (const [key, value] of Object.entries(cors)) {
+  for (const [key, value] of Object.entries({ ...cors, ...requestIdHeaders(requestId) })) {
     res.setHeader(key, value)
   }
 
@@ -31,7 +34,7 @@ export default async function handler(req, res) {
 
   const apiKey = getApiKey(req)
   if (!apiKey) {
-    return res.status(401).json({ error: 'Grok API not configured on server' })
+    return res.status(401).json({ error: 'Grok API not configured on server', requestId })
   }
 
   const { transcript, brief, personality = 'grok' } = req.body || {}
@@ -81,8 +84,18 @@ export default async function handler(req, res) {
       api,
       engine: 'grok-build',
       defaultModel: GROK_BUILD_MODEL,
+      requestId,
     })
   } catch (e) {
-    return res.status(500).json({ error: e?.message || 'Grok Build failed' })
+    return nodeErrorJson(res, req, {
+      requestId,
+      status: 500,
+      error: e?.message || 'Grok Build failed',
+      route: '/api/build',
+      kind: 'build',
+      transcript: user,
+      model: GROK_BUILD_MODEL,
+      durationMs: Date.now() - startedAt,
+    })
   }
 }

@@ -3,7 +3,7 @@
 **Goal:** Make IdeaSpeak the best "build and test in one app" experience — speak an idea, see a live preview, refine by voice, ship.
 
 **Live Demo:** https://ideaspeak-app.vercel.app  
-**Last updated:** July 30, 2026
+**Last updated:** August 12, 2026
 
 ---
 
@@ -21,7 +21,7 @@
 - [x] Environment matrix documented (`docs/ENV_MATRIX.md`)
 
 ### Product surfaces (built — polish remaining)
-- [x] ModeBadge — Simulator vs Real Grok in header (`ModeBadge.tsx`)
+- [x] ModeBadge — Simulator vs Real Grok in header (`ModeBadge.tsx` — `no API` / `live API` / `Key invalid` labels)
 - [x] API setup panel — Save & Verify xAI key (`ApiSetupPanel.tsx`, `api-verify.ts`)
 - [x] Preview-first workspace — Preview | Code tabs + Sandpack live preview
 - [x] Ship panel — Supabase · Vercel · domain checklist (`ShipPanel.tsx`, `ship.ts`)
@@ -36,8 +36,8 @@
 - [x] Landing page / hero clearly communicates **"Speak → Live Preview → Ship"** (`App.tsx` hero + step cues; header tagline still legacy on `sm+`)
 - [x] ModeBadge visible on mobile (`ModeBadge` always in header; only subtitle tagline hides on small screens)
 - [x] Settings modal: crystal-clear path for adding xAI API key + graceful fallback messaging (30s guide + live banner)
-- [x] Error states and loading states feel premium (`BuildProgressOverlay` — cancel during build, retry on error)
-- [x] Export (ZIP + GitHub) produces clean, runnable Next.js 15 projects **every time** (`buildProductionScaffold` + `smoke-e2e` ship unit test)
+- [x] Error states and loading states feel premium (`BuildProgressOverlay` — cancel, retry, error detail + request ref in toasts)
+- [x] Export (ZIP + GitHub) produces clean, runnable Next.js 15 projects **every time** (`buildProductionScaffold` + `validateExportScaffold` gate + `smoke-e2e` ship unit test)
 - [x] One-click Vercel deploy button always present (Ship Host + README badge; repo-aware clone URL) — live deploy still needs your Vercel account
 - [x] TypeScript clean build — `tsc -b && vite build` (no `|| true` mask)
 - [x] Full-screen live preview / "Test mode" (banner + Esc exit)
@@ -46,7 +46,7 @@
 
 - [x] E2B client + server manager wired (`E2B_API_KEY` enables real; graceful stub without)
 - [x] Rate limiting + basic abuse protection on API routes (`api/security.js` — per-IP fixed window on build/discuss/refine)
-- [ ] Better observability / logging for failed generations (structured request IDs)
+- [x] Better observability / logging for failed generations (structured request IDs)
 - [x] Environment variable validation on boot (`server/index.ts` validateEnv)
 - [ ] Railway Bun server deployed + monitored (`/health` in production)
 - [ ] Auth (optional for demo, required for multi-user)
