@@ -79,9 +79,11 @@ export async function chatCompletion(apiKey, {
     max_tokens: maxTokens,
     temperature,
   }
-  // Only attach reasoning_effort for models that support it
-  if (reasoningEffort && String(MODELS.chat).includes('grok-4')) {
-    body.reasoning_effort = reasoningEffort
+  // Only attach reasoning_effort for models that support it (grok-4.5 rejects `none`)
+  const effort =
+    reasoningEffort === 'none' ? 'low' : reasoningEffort
+  if (effort && String(MODELS.chat).includes('grok-4')) {
+    body.reasoning_effort = effort
   }
 
   const res = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -136,6 +138,7 @@ export async function pingXai(apiKey) {
     messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
     maxTokens: 8,
     temperature: 0,
-    reasoningEffort: 'none',
+    // Omit reasoning_effort on ping — grok-4.5 rejects `none`; `low` is unnecessary for health check
+    reasoningEffort: undefined,
   })
 }

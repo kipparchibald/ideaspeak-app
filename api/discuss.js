@@ -59,7 +59,7 @@ export default async function handler(req) {
     messages: fullMessages,
     temperature: isVoice ? 0.95 : 0.85,
     maxTokens: isVoice ? 180 : 1200,
-    reasoningEffort: isVoice ? 'none' : 'low',
+    reasoningEffort: 'low',
   })
 
   if (!ok) {
