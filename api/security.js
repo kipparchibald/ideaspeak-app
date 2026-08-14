@@ -67,7 +67,7 @@ export function corsHeaders(req) {
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-AI-Key, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, X-AI-Key, Authorization, X-User-Id',
     Vary: 'Origin',
   }
 }

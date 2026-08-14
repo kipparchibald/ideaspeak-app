@@ -101,10 +101,12 @@ import {
   type BuildProgressSnapshot,
 } from './lib/build-progress'
 import {
-  canUse,
   recordUsage,
   getPlanId,
   remainingQuota,
+  checkUsageGate,
+  refreshServerBilling,
+  getCurrentUserId,
   type PlanId,
 } from './lib/billing'
 import {
@@ -605,6 +607,13 @@ export default function App() {
   })
   const buildsLeft = remainingQuota('build')
   void usageTick // re-render after recordUsage bumps tick
+
+  useEffect(() => {
+    if (!getCurrentUserId()) return
+    void refreshServerBilling().then((snap) => {
+      if (snap?.authoritative && snap.plan) setPlanIdState(snap.plan)
+    })
+  }, [])
 
   const [apiKey, setApiKey] = useState(() => loadKey())
   /** Verified live Grok (not just "key string present") */
@@ -1267,7 +1276,7 @@ export default function App() {
       lastBuildBriefRef.current = { idea, history }
       const isCancelled = () => gen !== buildGenerationRef.current
 
-      const gate = canUse('build')
+      const gate = await checkUsageGate('build')
       if (!gate.ok) {
         toast.error(gate.reason || 'Build limit reached', {
           action: { label: 'Upgrade', onClick: () => setShowPricing(true) },
@@ -1967,7 +1976,7 @@ export default function App() {
   }
 
   const exportProductionZip = async (prefs?: ShipPreferences) => {
-    const gate = canUse('ship')
+    const gate = await checkUsageGate('ship')
     if (!gate.ok) {
       toast.error(gate.reason || 'Ship limit reached')
       setShowPricing(true)

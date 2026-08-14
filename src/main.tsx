@@ -3,10 +3,12 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { initAnalytics } from './lib/analytics'
+import { initErrorReporting, reportClientError } from './lib/error-reporting'
 
 class RootErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null }
   static getDerivedStateFromError(error: Error) {
+    reportClientError(error.message, { stack: error.stack, source: 'RootErrorBoundary' })
     return { error: error.message }
   }
   render() {
@@ -36,6 +38,7 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: stri
 }
 
 initAnalytics()
+initErrorReporting()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

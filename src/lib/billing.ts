@@ -123,11 +123,32 @@ const DEMO_PRO_KEY = 'ideaspeak_demo_pro'
 
 export type UsageKind = 'build' | 'ship' | 'polish'
 
+export interface ServerUsageSnapshot {
+  plan: PlanId
+  usage: { builds: number; ships: number; polish: number }
+  limits: { builds: number; ships: number; polish: number }
+  authoritative: boolean
+  message?: string
+}
+
+export interface UsageGateResult {
+  ok: boolean
+  reason?: string
+  remaining?: number
+  source?: 'local' | 'server'
+  authoritative?: boolean
+}
+
 interface DayUsage {
   date: string // YYYY-MM-DD
   build: number
   ship: number
   polish: number
+}
+
+export function getCurrentUserId(): string | null {
+  if (typeof window === 'undefined') return null
+  return (window as unknown as { __ideaspeakUserId?: string }).__ideaspeakUserId || null
 }
 
 function todayKey(): string {
@@ -208,7 +229,57 @@ export function remainingQuota(kind: UsageKind): number | null {
   return plan.limits.polishPacks ? null : 0
 }
 
-export function canUse(kind: UsageKind): { ok: boolean; reason?: string; remaining?: number } {
+/** Pure evaluator for server usage snapshots — unit-tested in smoke-e2e. */
+export function evaluateRemoteUsageGate(
+  kind: UsageKind,
+  remote: Pick<ServerUsageSnapshot, 'plan' | 'usage' | 'limits'>,
+): UsageGateResult {
+  if (kind === 'polish') {
+    const polishAllowed = remote.plan !== 'free' && remote.limits.polish > 0
+    if (!polishAllowed) {
+      return {
+        ok: false,
+        reason: 'Multi-model polish packs are a Pro feature.',
+        remaining: 0,
+        source: 'server',
+        authoritative: true,
+      }
+    }
+    return { ok: true, source: 'server', authoritative: true }
+  }
+
+  const col = kind === 'build' ? 'builds' : 'ships'
+  const limit = remote.limits[col]
+  const current = remote.usage[col]
+  const label = kind === 'build' ? 'builds' : 'ship exports'
+
+  if (limit < 999 && current >= limit) {
+    return {
+      ok: false,
+      reason: `${remote.plan} plan: ${limit} ${label}/day reached. Upgrade to Pro for unlimited.`,
+      remaining: 0,
+      source: 'server',
+      authoritative: true,
+    }
+  }
+
+  return {
+    ok: true,
+    remaining: limit < 999 ? limit - current : undefined,
+    source: 'server',
+    authoritative: true,
+  }
+}
+
+/** Sync paid plan from Supabase when server metering is authoritative (skips demo unlock). */
+export function applyServerPlan(plan: PlanId) {
+  if (isDemoPro()) return
+  if (plan === 'free' || plan === 'pro' || plan === 'team') {
+    setPlanId(plan)
+  }
+}
+
+export function canUse(kind: UsageKind): UsageGateResult {
   const plan = getPlan()
   const usage = loadUsage()
 
@@ -219,9 +290,10 @@ export function canUse(kind: UsageKind): { ok: boolean; reason?: string; remaini
         ok: false,
         reason: `Free plan: ${limit} builds/day. Upgrade to Pro for unlimited.`,
         remaining: 0,
+        source: 'local',
       }
     }
-    return { ok: true, remaining: limit - usage.build }
+    return { ok: true, remaining: limit - usage.build, source: 'local' }
   }
 
   if (kind === 'ship') {
@@ -231,9 +303,10 @@ export function canUse(kind: UsageKind): { ok: boolean; reason?: string; remaini
         ok: false,
         reason: `Free plan: ${limit} production export/day. Upgrade to Pro for unlimited Ship.`,
         remaining: 0,
+        source: 'local',
       }
     }
-    return { ok: true, remaining: limit - usage.ship }
+    return { ok: true, remaining: limit - usage.ship, source: 'local' }
   }
 
   if (kind === 'polish') {
@@ -242,12 +315,46 @@ export function canUse(kind: UsageKind): { ok: boolean; reason?: string; remaini
         ok: false,
         reason: 'Multi-model polish packs are a Pro feature.',
         remaining: 0,
+        source: 'local',
       }
     }
-    return { ok: true, remaining: 999 }
+    return { ok: true, remaining: 999, source: 'local' }
   }
 
-  return { ok: true }
+  return { ok: true, source: 'local' }
+}
+
+/**
+ * Authoritative gate when signed in + Supabase service key is configured.
+ * Falls back to local metering for anonymous / offline demo users.
+ */
+export async function checkUsageGate(kind: UsageKind): Promise<UsageGateResult> {
+  const local = canUse(kind)
+  if (!local.ok) return local
+
+  const uid = getCurrentUserId()
+  if (!uid) return { ...local, source: 'local' }
+
+  const remote = await fetchServerUsage(uid)
+  if (!remote?.authoritative) return { ...local, source: 'local' }
+
+  applyServerPlan(remote.plan)
+  const remoteGate = evaluateRemoteUsageGate(kind, remote)
+  if (!remoteGate.ok) return remoteGate
+
+  return {
+    ok: true,
+    remaining: remoteGate.remaining ?? local.remaining,
+    source: 'server',
+    authoritative: true,
+  }
+}
+
+/** Pull plan + usage from server — call after sign-in or before pricing panel opens. */
+export async function refreshServerBilling(): Promise<ServerUsageSnapshot | null> {
+  const snap = await fetchServerUsage()
+  if (snap?.authoritative) applyServerPlan(snap.plan)
+  return snap
 }
 
 export function recordUsage(kind: UsageKind) {
@@ -263,12 +370,8 @@ export function recordUsage(kind: UsageKind) {
 export async function recordUsageOnServer(
   kind: UsageKind,
   userId?: string | null,
-): Promise<{ recorded: boolean }> {
-  const uid =
-    userId ||
-    (typeof window !== 'undefined'
-      ? (window as unknown as { __ideaspeakUserId?: string }).__ideaspeakUserId
-      : null)
+): Promise<{ recorded: boolean; limited?: boolean; reason?: string }> {
+  const uid = userId || getCurrentUserId()
   if (!uid) return { recorded: false }
   try {
     const res = await fetch(billingApiBase('/api/usage'), {
@@ -276,20 +379,40 @@ export async function recordUsageOnServer(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind, userId: uid }),
     })
-    const data = await res.json().catch(() => ({}))
+    const data = (await res.json().catch(() => ({}))) as {
+      recorded?: boolean
+      reason?: string
+    }
+    if (res.status === 429) {
+      return { recorded: false, limited: true, reason: data.reason || 'Usage limit reached' }
+    }
     return { recorded: !!data.recorded }
   } catch {
     return { recorded: false }
   }
 }
 
-export async function fetchServerUsage(userId?: string | null) {
-  const uid = userId || null
+export async function fetchServerUsage(
+  userId?: string | null,
+): Promise<ServerUsageSnapshot | null> {
+  const uid = userId ?? getCurrentUserId()
   const headers: Record<string, string> = {}
   if (uid) headers['X-User-Id'] = uid
-  const res = await fetch(billingApiBase('/api/usage'), { headers })
-  if (!res.ok) return null
-  return res.json()
+  try {
+    const res = await fetch(billingApiBase('/api/usage'), { headers })
+    if (!res.ok) return null
+    const data = (await res.json()) as ServerUsageSnapshot & { usage?: ServerUsageSnapshot['usage'] }
+    if (!data.limits || !data.usage) return null
+    return {
+      plan: (data.plan as PlanId) || 'free',
+      usage: data.usage,
+      limits: data.limits,
+      authoritative: !!data.authoritative,
+      message: data.message,
+    }
+  } catch {
+    return null
+  }
 }
 
 let stripeConfiguredCache: boolean | null = null

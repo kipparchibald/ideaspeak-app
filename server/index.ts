@@ -599,6 +599,11 @@ ${transcript || ''}`
       return usageHandler(req)
     }
 
+    if (url.pathname === '/api/report-error' && req.method === 'POST') {
+      const { default: reportHandler } = await import('../api/report-error.js')
+      return reportHandler(req)
+    }
+
     if (url.pathname === '/api/local-preview/sync' && req.method === 'POST') {
       try {
         const body = await req.json()
