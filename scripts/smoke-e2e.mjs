@@ -87,7 +87,8 @@ await step('API health / status JSON', async () => {
   if (REQUIRE_LIVE && !grokLive) {
     throw new Error(data.message || 'Grok not live (--require-live)')
   }
-  return `live=${grokLive} source=${data.source || '?'} model=${data.model || '?'}`
+  const healthNote = data.health ? 'health=ok' : 'health=pending'
+  return `live=${grokLive} source=${data.source || '?'} model=${data.model || '?'} ${healthNote}`
 })
 
 if (RUN_SECURITY) {
@@ -128,6 +129,53 @@ if (RUN_SECURITY) {
     if (!data.limits || !data.usage) throw new Error('usage shape invalid')
     return `authoritative=${!!data.authoritative} plan=${data.plan}`
   })
+
+  await step('Security: CORS allows X-User-Id', async () => {
+    const { corsHeaders } = await import('../api/security.js')
+    const origin = API.includes('localhost')
+      ? 'http://localhost:8080'
+      : 'https://ideaspeak-app.vercel.app'
+    const headers = corsHeaders({
+      headers: { get: (h) => (String(h).toLowerCase() === 'origin' ? origin : null) },
+    })
+    const allow = headers['Access-Control-Allow-Headers'] || ''
+    if (!/x-user-id/i.test(allow)) throw new Error(`missing X-User-Id in Allow-Headers: ${allow}`)
+    return allow
+  })
+
+  await step('Unit: server usage gate evaluator', async () => {
+    const { evaluateRemoteUsageGate } = await import('../src/lib/billing.ts')
+    const blocked = evaluateRemoteUsageGate('build', {
+      plan: 'free',
+      usage: { builds: 25, ships: 0, polish: 0 },
+      limits: { builds: 25, ships: 5, polish: 0 },
+    })
+    if (blocked.ok) throw new Error('expected build block at limit')
+    const ok = evaluateRemoteUsageGate('ship', {
+      plan: 'pro',
+      usage: { builds: 10, ships: 2, polish: 1 },
+      limits: { builds: 999, ships: 999, polish: 999 },
+    })
+    if (!ok.ok) throw new Error('pro ship should pass')
+    const polishBlocked = evaluateRemoteUsageGate('polish', {
+      plan: 'free',
+      usage: { builds: 0, ships: 0, polish: 0 },
+      limits: { builds: 25, ships: 5, polish: 0 },
+    })
+    if (polishBlocked.ok) throw new Error('free polish should block')
+    return 'limits enforced'
+  })
+
+  await step(
+    'Status: platform health block',
+    async () => {
+      const res = await fetch(`${API}/api/status`, { signal: AbortSignal.timeout(15_000) })
+      const data = await res.json()
+      if (!data.health) throw new Error('health block missing')
+      return `supabase=${!!data.health.supabase} stripe=${!!data.health.stripe}`
+    },
+    { optional: true },
+  )
 
   await step('Observability: requestId module', async () => {
     const { createRequestId, hashForLog, jsonErrorBody } = await import('../api/observability.js')

@@ -13,12 +13,26 @@ export default async function handler(req) {
 
   const apiKey = getApiKey(req)
 
+  const health = {
+    supabase: !!(
+      process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_KEY?.trim()
+    ),
+    stripe: !!process.env.STRIPE_SECRET_KEY?.trim(),
+    shipWorker: !!(
+      process.env.SHIP_WORKER_URL?.trim() && process.env.SHIP_WORKER_SECRET?.trim()
+    ),
+    usageAuthoritative: !!(
+      process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_KEY?.trim()
+    ),
+  }
+
   if (!apiKey) {
     return new Response(
       JSON.stringify({
         live: false,
         source: 'none',
         model: MODELS.chat,
+        health,
         message: hasServerApiKey()
           ? 'Server key configured but unavailable'
           : 'Add XAI_API_KEY to Vercel (ideaspeak-app → Production) or .env.local for local dev',
@@ -35,6 +49,7 @@ export default async function handler(req) {
         live: false,
         source: 'server',
         model: MODELS.chat,
+        health,
         message: xaiError(data, 'xAI key invalid or API unreachable'),
       }),
       { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
@@ -48,6 +63,7 @@ export default async function handler(req) {
       model: MODELS.chat,
       buildModel: MODELS.build,
       engine: 'grok-build',
+      health,
       message: hasServerApiKey()
         ? 'Ready — plan with ' + MODELS.chat + ', build with ' + MODELS.build + ' (best $/quality)'
         : 'Dev ready — plan with ' + MODELS.chat + ', build with ' + MODELS.build + ' (best $/quality)',

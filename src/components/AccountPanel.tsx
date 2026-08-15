@@ -14,6 +14,7 @@ import {
   onSupabaseAuthStateChange,
 } from '../lib/supabase'
 import { saveAllWorkspacesToCloud, syncWorkspacesFromCloud } from '../lib/projects'
+import { refreshServerBilling } from '../lib/billing'
 
 export function AccountPanel() {
   const [email, setEmail] = useState('')
@@ -35,6 +36,7 @@ export function AccountPanel() {
       }
       if (u) {
         void (async () => {
+          await refreshServerBilling()
           const pulled = await syncWorkspacesFromCloud()
           if (pulled.ok && pulled.synced > 0) {
             toast.message('Projects synced from cloud', {

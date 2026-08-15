@@ -18,6 +18,8 @@ import {
   isStripeCheckoutAvailable,
   createCheckoutSession,
   handleCheckoutReturn,
+  refreshServerBilling,
+  getCurrentUserId,
   type PlanId,
 } from '../lib/billing'
 import { track } from '../lib/analytics'
@@ -34,6 +36,7 @@ export function PricingPanel({ open, onClose, onPlanChange }: PricingPanelProps)
   const [planId, setLocalPlan] = useState<PlanId>(() => getPlanId())
   const [stripeReady, setStripeReady] = useState<boolean | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState<PlanId | null>(null)
+  const [serverMetering, setServerMetering] = useState<string | null>(null)
   const usage = getUsage()
   const demo = isDemoPro()
 
@@ -43,10 +46,25 @@ export function PricingPanel({ open, onClose, onPlanChange }: PricingPanelProps)
     isStripeCheckoutAvailable().then((ok) => {
       if (!cancelled) setStripeReady(ok)
     })
+    void (async () => {
+      const snap = await refreshServerBilling()
+      if (cancelled || !snap) return
+      if (snap.authoritative) {
+        setLocalPlan(snap.plan)
+        onPlanChange?.(snap.plan)
+        setServerMetering(
+          `Cloud · builds ${snap.usage.builds}/${snap.limits.builds} · ships ${snap.usage.ships}/${snap.limits.ships}`,
+        )
+      } else if (getCurrentUserId()) {
+        setServerMetering('Signed in — add Supabase service key on server for cloud limits')
+      } else {
+        setServerMetering(null)
+      }
+    })()
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, onPlanChange])
 
   useEffect(() => {
     const returned = handleCheckoutReturn()
@@ -172,6 +190,9 @@ export function PricingPanel({ open, onClose, onPlanChange }: PricingPanelProps)
 
               <div className="text-[11px] text-[#555]">
                 Today · builds {usage.build} · ship exports {usage.ship} · polish {usage.polish}
+                {serverMetering && (
+                  <span className="block mt-1 text-[#666]">{serverMetering}</span>
+                )}
                 {demo && (
                   <span className="ml-2 text-[#00ff88]">· Demo Pro on</span>
                 )}
