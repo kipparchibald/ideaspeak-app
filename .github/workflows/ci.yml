@@ -26,11 +26,14 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Chief desk unit tests
+        run: bun run test:chief
+
       - name: Install Playwright Chromium
         run: bunx playwright install chromium --with-deps
 
       - name: Start API server
-        run: bun run server &
+        run: CHIEF_GATE_SECRET=test-chief-gate-secret-unit bun run server &
 
       - name: Start preview server
         run: bun run preview -- --port 8080 --host &
@@ -46,6 +49,9 @@ jobs:
           done
           echo "Servers did not become ready in time"
           exit 1
+
+      - name: Chief desk API gate tests
+        run: CHIEF_GATE_SECRET=test-chief-gate-secret-unit bun run test:chief:api
 
       - name: Smoke tests
         run: bun run smoke:local

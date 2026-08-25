@@ -37,6 +37,10 @@ export interface GrokVoiceOptions {
   /** Prior turns — lightly seeded after session.updated (instructions carry most context) */
   conversationSeed?: GrokVoiceConversationTurn[]
   greetingInstructions?: string
+  /** Override token endpoint paths (e.g. gated Chief desk) */
+  tokenPaths?: string[]
+  /** Extra headers for token fetch (e.g. X-Chief-Session) */
+  tokenHeaders?: Record<string, string>
   onUserTranscript?: (text: string, isFinal: boolean) => void
   onAssistantTranscript?: (text: string, isFinal: boolean) => void
   onStateChange?: (state: GrokVoiceState) => void
@@ -191,6 +195,7 @@ export class GrokVoiceAgent {
   private async fetchVoiceToken(path: string): Promise<string> {
     const res = await fetch(path, {
       method: 'POST',
+      headers: this.opts.tokenHeaders,
       signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
     })
     const data = await res.json().catch(() => ({} as Record<string, unknown>))
@@ -213,7 +218,9 @@ export class GrokVoiceAgent {
   }
 
   private async getEphemeralToken(): Promise<string> {
-    const paths = ['/api/voice/token', '/api/voice-token']
+    const paths = this.opts.tokenPaths?.length
+      ? this.opts.tokenPaths
+      : ['/api/voice/token', '/api/voice-token']
     let lastErr = 'Voice token failed'
     for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
       for (const path of paths) {

@@ -24,7 +24,9 @@
     "verify:grok": "bun scripts/verify-grok.mjs",
     "setup:in-house": "bun scripts/setup-in-house.mjs",
     "verify:in-house": "bun scripts/verify-in-house.mjs",
-    "walkthrough:in-house": "bun scripts/walkthrough-in-house.mjs"
+    "walkthrough:in-house": "bun scripts/walkthrough-in-house.mjs",
+    "test:chief": "bun scripts/chief-unit.mjs",
+    "test:chief:api": "CHIEF_GATE_SECRET=test-chief-gate-secret-unit CHIEF_TEST_API=1 bun scripts/chief-unit.mjs --api"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.20.0",

@@ -383,6 +383,27 @@ const server = serve({
       }
     }
 
+    // ── Chief of Staff desk (gated — /chief) ─────────────────────────────────
+    if (url.pathname === '/api/chief/unlock' && req.method === 'POST') {
+      const { default: unlockHandler } = await import('../api/chief/unlock.js')
+      return unlockHandler(req)
+    }
+
+    if (url.pathname === '/api/chief/status' && req.method === 'GET') {
+      const { default: statusHandler } = await import('../api/chief/status.js')
+      return statusHandler(req)
+    }
+
+    if (url.pathname === '/api/chief/discuss' && req.method === 'POST') {
+      const { default: discussHandler } = await import('../api/chief/discuss.js')
+      return discussHandler(req)
+    }
+
+    if (url.pathname === '/api/chief/voice-token' && req.method === 'POST') {
+      const { default: chiefVoiceHandler } = await import('../api/chief/voice-token.js')
+      return chiefVoiceHandler(req)
+    }
+
     // ── Chat/text proxy — client Settings key first, then .env.local ──────────
     const apiKey =
       req.headers.get('X-AI-Key') ||
