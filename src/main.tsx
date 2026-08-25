@@ -2,6 +2,11 @@ import { StrictMode, Component, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import ChiefDesk from './components/ChiefDesk.tsx'
+
+const isChiefRoute =
+  typeof window !== 'undefined' &&
+  (window.location.pathname === '/chief' || window.location.pathname === '/chief/')
 import { initAnalytics } from './lib/analytics'
 import { initErrorReporting, reportClientError } from './lib/error-reporting'
 
@@ -43,7 +48,7 @@ initErrorReporting()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <App />
+      {isChiefRoute ? <ChiefDesk /> : <App />}
     </RootErrorBoundary>
   </StrictMode>,
 )
