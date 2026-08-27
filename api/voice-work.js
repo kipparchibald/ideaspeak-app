@@ -219,7 +219,7 @@ export const NAMED_PRODUCTION_REPOS = [
   { pattern: /archibald-bagley/i, desk: 'Sites', name: 'archibald-bagley' },
 ]
 
-const ACT_SECONDS = {
+export const ACT_SECONDS = {
   BUILD: 60,
   DRAFT: 20,
   RESEARCH: 30,

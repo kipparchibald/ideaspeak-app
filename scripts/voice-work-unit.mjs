@@ -183,5 +183,13 @@ const toyAct = executeActLocal(toyBuild, {})
 assert('toy BUILD action is BUILD', toyAct.action === 'BUILD')
 assert('toy BUILD has buildPrompt', typeof toyAct.buildPrompt === 'string' && toyAct.buildPrompt.length > 0)
 
+// ── Act module exports (Vercel edge bundle) ─────────────────────────────────
+
+const { ACT_SECONDS: actSeconds } = await import('../api/voice-work.js')
+assert('ACT_SECONDS is exported', actSeconds?.BUILD === 60 && actSeconds?.DRAFT === 20)
+
+const actMod = await import('../api/act.js')
+assert('api/act.js imports without missing exports', typeof actMod.default === 'function')
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
