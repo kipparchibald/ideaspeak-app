@@ -41,9 +41,35 @@ export interface VoiceWorkRefine {
 }
 
 export interface WorkProduct {
-  type: 'draft' | 'checklist' | 'brief' | 'handoff' | 'research'
+  type: 'draft' | 'checklist' | 'brief' | 'handoff' | 'research' | 'desk'
   title: string
   content: string
+  draft?: { title: string; body: string; unsent: boolean }
+  claims?: { text: string; source: string | null }[]
+  need?: 'paste' | 'route'
+  drafts?: { subject: string; body: string; unsent: boolean }[]
+  handoff?: { desk: string; why: string; decided: string[]; missing: string[] }
+}
+
+export interface ActReceipt {
+  kind: VoiceWorkKind | string
+  spoken: string
+  will: string
+  willNot: string[]
+  seconds: number
+  sendBlocked: boolean
+}
+
+export interface ActResult {
+  ok?: boolean
+  receipt: ActReceipt
+  action: 'BUILD' | 'WORK'
+  effectiveKind: VoiceWorkKind | string
+  buildPrompt?: string
+  workProduct?: WorkProduct
+  spokenFinish?: string
+  error?: string
+  missing?: string[]
 }
 
 export const EMPTY_BRIEF: VoiceWorkBrief = {
@@ -199,4 +225,56 @@ export async function refineTranscript(
   } catch {
     return null
   }
+}
+
+export async function callAct(params: {
+  refine: VoiceWorkRefine
+  userIntent?: string
+  history?: { role: string; content: string }[]
+}): Promise<ActResult | null> {
+  try {
+    const res = await fetch('/api/act', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        refine: params.refine,
+        userIntent: params.userIntent || '',
+        history: params.history || [],
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      return {
+        ok: false,
+        receipt: {
+          kind: params.refine.kind,
+          spoken: '',
+          will: '',
+          willNot: ['send'],
+          seconds: 0,
+          sendBlocked: false,
+        },
+        action: 'WORK',
+        effectiveKind: params.refine.kind,
+        error: data.error,
+        missing: data.missing,
+      }
+    }
+    return data as ActResult
+  } catch {
+    return null
+  }
+}
+
+/** Map act work product → pane list */
+export function actWorkProductToPane(wp: WorkProduct): WorkProduct[] {
+  return [wp]
+}
+
+/** True when preview should use Sandpack (BUILD toy only, after act) */
+export function shouldShowSandpackAfterAct(
+  effectiveKind: string,
+  hasBuilt: boolean,
+): boolean {
+  return effectiveKind === 'BUILD' || hasBuilt
 }

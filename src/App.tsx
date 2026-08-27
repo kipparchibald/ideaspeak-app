@@ -37,9 +37,12 @@ import {
   isBuildKind,
   refineTranscript,
   statusLabelForKind,
-  synthesizeWorkProducts,
+  callAct,
+  actWorkProductToPane,
+  shouldShowSandpackAfterAct,
   type VoiceWorkRefine,
   type WorkProduct,
+  type ActReceipt,
 } from './lib/voice-work'
 import { LivingBriefCard } from './components/LivingBriefCard'
 import { WorkProductPane } from './components/WorkProductPane'
@@ -567,6 +570,9 @@ export default function App() {
   const [voiceRefine, setVoiceRefine] = useState<VoiceWorkRefine>(EMPTY_REFINE)
   const [workProducts, setWorkProducts] = useState<WorkProduct[]>([])
   const [isDraftingWork, setIsDraftingWork] = useState(false)
+  const [actReceipt, setActReceipt] = useState<ActReceipt | null>(null)
+  const [effectiveActKind, setEffectiveActKind] = useState<string>('BUILD')
+  const [acting, setActing] = useState(false)
   const voiceRefineRef = useRef(voiceRefine)
   voiceRefineRef.current = voiceRefine
   const voiceTurnRef = useRef(false)
@@ -1295,48 +1301,6 @@ export default function App() {
     [],
   )
 
-  /** Produce work product for non-BUILD kinds (DESK/DRAFT/RESEARCH/ROUTE) */
-  const doWorkFromBrief = useCallback(
-    async (history: ChatMessage[], refine: VoiceWorkRefine) => {
-      setIsDraftingWork(true)
-      setShowWorkspace(true)
-      setMobilePanel('app')
-      setWorkspaceTab('preview')
-      try {
-        const res = await fetch('/api/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            conversation: history.map((m) => ({ role: m.role, content: m.content })),
-            kind: refine.kind,
-            personality,
-          }),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data.plan?.workProducts) && data.plan.workProducts.length > 0) {
-            setWorkProducts(data.plan.workProducts)
-            toast.success('Work product ready', {
-              description: 'Draft only — nothing sent.',
-            })
-            return
-          }
-        }
-        const local = synthesizeWorkProducts(refine)
-        setWorkProducts(local)
-        toast.success('Work product drafted', {
-          description: 'Local draft — review before any send.',
-        })
-      } catch {
-        setWorkProducts(synthesizeWorkProducts(refine))
-        toast.message('Draft ready locally')
-      } finally {
-        setIsDraftingWork(false)
-      }
-    },
-    [personality],
-  )
-
   /** Always produce a runnable preview — local scaffold first (instant), Grok optional upgrade */
   const materializeApp = useCallback(
     async (idea: string, history: ChatMessage[]) => {
@@ -1586,6 +1550,77 @@ export default function App() {
     [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],
   )
 
+  /** GATE → RECEIPT → ACT → SHOW */
+  const runAct = useCallback(
+    async (history: ChatMessage[], refine: VoiceWorkRefine, userIntent: string) => {
+      setActing(true)
+      setIsDraftingWork(true)
+      setShowWorkspace(true)
+      setMobilePanel('app')
+      setWorkspaceTab('preview')
+
+      const result = await callAct({
+        refine,
+        userIntent,
+        history: history.map((m) => ({ role: m.role, content: m.content })),
+      })
+
+      if (!result || result.error) {
+        setActing(false)
+        setIsDraftingWork(false)
+        toast.message('Brief not complete', {
+          description: result?.error || result?.missing?.join(', ') || 'Fill the brief first.',
+        })
+        return
+      }
+
+      setActReceipt(result.receipt)
+      setEffectiveActKind(result.effectiveKind)
+      void narrate(result.receipt.spoken, { force: true, voiceMode: true })
+
+      if (result.action === 'BUILD' && result.buildPrompt) {
+        setActing(false)
+        setIsDraftingWork(false)
+        const built = await materializeApp(result.buildPrompt, history)
+        const planText = sanitizeBuildTalk(built.plan || '')
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content:
+            (result.spokenFinish || 'Live preview is up on the right.') +
+            (planText ? `\n\n${planText}` : ''),
+          timestamp: Date.now(),
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+        if (result.spokenFinish) {
+          void narrate(result.spokenFinish, { force: true, voiceMode: true })
+        }
+        return built
+      }
+
+      if (result.workProduct) {
+        setWorkProducts(actWorkProductToPane(result.workProduct))
+        toast.success('Work product ready', {
+          description: result.receipt.sendBlocked
+            ? 'You asked to send — outbound is off. Draft only.'
+            : 'Preview only — nothing sent.',
+        })
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: result.spokenFinish || `${result.effectiveKind} work is in the pane — draft only.`,
+          timestamp: Date.now(),
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+        if (result.spokenFinish) {
+          void narrate(result.spokenFinish, { force: true, voiceMode: true })
+        }
+      }
+
+      setActing(false)
+      setIsDraftingWork(false)
+    },
+    [materializeApp, narrate],
+  )
+
   const sendMessage = useCallback(
     async (text?: string, modeOverride?: Mode, opts?: { force?: boolean; voiceHandoff?: boolean }) => {
       const content = (text || input).trim()
@@ -1717,36 +1752,9 @@ export default function App() {
           }
         } else {
           const refine = voiceRefineRef.current
-          if (!isBuildKind(refine.kind)) {
-            await doWorkFromBrief(nextHistory, refine)
-            const assistantMsg: ChatMessage = {
-              role: 'assistant',
-              content:
-                `${refine.kind} work product is in the panel on the right — draft only, nothing sent.\n\nReview it and tell me what to change.`,
-              timestamp: Date.now(),
-            }
-            setMessages((prev) => [...prev, assistantMsg])
-          } else {
-            const buildBrief = refine.optimizedPrompt || compilePlanBrief(nextHistory)
-            const built = await materializeApp(buildBrief, nextHistory)
-          const planText = sanitizeBuildTalk(built.plan || '')
-          const assistantMsg: ChatMessage = {
-            role: 'assistant',
-            content:
-              `Live preview is up for “${built.name || 'your app'}” on the right.\n\n` +
-              (planText || 'Click through it, then refine by voice or open Ship when you’re ready.'),
-            timestamp: Date.now(),
-          }
-          setMessages((prev) => [...prev, assistantMsg])
-          const doneLine = `${built.name || 'Your app'} is live in the preview. Tell me what to change, or open Ship when you're ready.`
-          if (voiceBuildHandoffRef.current || grokAgentRef.current?.isConnected()) {
-            grokAgentRef.current?.speakLine(
-              `Celebrate briefly — tell the user "${built.name || 'their app'}" is live in the preview on the right and they can click around or keep talking to refine. Two short sentences max.`,
-            )
+          await runAct(nextHistory, refine, content)
+          if (voiceBuildHandoffRef.current) {
             voiceBuildHandoffRef.current = false
-          } else {
-            void narrate(doneLine, { force: fromVoice || ttsEnabled, voiceMode: true })
-          }
           }
         }
       } catch (err) {
@@ -1793,7 +1801,7 @@ export default function App() {
       stopVoice,
       kickVoiceBuild,
       materializeApp,
-      doWorkFromBrief,
+      runAct,
       runRefineAfterTurn,
     ],
   )
@@ -1995,8 +2003,6 @@ export default function App() {
     setMode('build')
     void sendMessage(isBuildKind(voiceRefine.kind) ? 'build it' : 'do this', 'build')
   }
-
-  const lastUserIdea = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
 
   const sessionTranscript = messages
     .map((m) => `${m.role}: ${m.content}`)
@@ -2541,7 +2547,12 @@ export default function App() {
             )}
 
             {userTurns >= 1 && !hasBuilt && (
-              <LivingBriefCard refine={voiceRefine} isBuilding={isBuilding || isDraftingWork} />
+              <LivingBriefCard
+                refine={voiceRefine}
+                isBuilding={isBuilding || isDraftingWork}
+                receipt={actReceipt}
+                acting={acting}
+              />
             )}
 
             {isLoading && !isBuilding && !isUpgrading && buildProgress.log.length === 0 && (
@@ -3213,11 +3224,11 @@ export default function App() {
                   </div>
                 )}
               <Suspense fallback={<SandpackLoadingFallback />}>
-                {!isBuildKind(voiceRefine.kind) && !hasBuilt ? (
+                {!shouldShowSandpackAfterAct(effectiveActKind, hasBuilt) ? (
                   <WorkProductPane
                     products={workProducts}
-                    kind={voiceRefine.kind}
-                    isDrafting={isDraftingWork}
+                    kind={effectiveActKind}
+                    isDrafting={isDraftingWork || acting}
                   />
                 ) : (
                   <PreviewEditWorkspace

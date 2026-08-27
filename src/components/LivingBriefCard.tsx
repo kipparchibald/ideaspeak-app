@@ -1,13 +1,17 @@
 import { ClipboardList, AlertCircle, CheckCircle2 } from 'lucide-react'
 import type { VoiceWorkRefine } from '../lib/voice-work'
 import { statusLabelForKind } from '../lib/voice-work'
+import type { ActReceipt } from '../lib/voice-work'
+import { ReceiptStrip } from './ReceiptStrip'
 
 interface LivingBriefCardProps {
   refine: VoiceWorkRefine
   isBuilding?: boolean
+  receipt?: ActReceipt | null
+  acting?: boolean
 }
 
-export function LivingBriefCard({ refine, isBuilding = false }: LivingBriefCardProps) {
+export function LivingBriefCard({ refine, isBuilding = false, receipt = null, acting = false }: LivingBriefCardProps) {
   const { brief, kind, ready, missing } = refine
   const hasContent =
     brief.who || brief.job || brief.v1.length > 0 || missing.length < 10
@@ -81,6 +85,12 @@ export function LivingBriefCard({ refine, isBuilding = false }: LivingBriefCardP
           <div className="pt-1 text-[11px] text-[#888]">
             Handoff → <span className="text-[#c4c4d4]">{refine.handoff.target}</span>
             {refine.handoff.reason ? ` · ${refine.handoff.reason}` : ''}
+          </div>
+        )}
+
+        {receipt && (
+          <div className="pt-2">
+            <ReceiptStrip receipt={receipt} acting={acting} />
           </div>
         )}
       </div>

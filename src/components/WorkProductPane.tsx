@@ -53,7 +53,9 @@ export function WorkProductPane({ products, kind, isDrafting = false }: WorkProd
               <Icon size={14} className="text-[#00ff88]" />
               <span className="text-[12px] font-semibold text-[#c4c4d4]">{product.title}</span>
               <span className="ml-auto text-[10px] uppercase tracking-wide text-[#555]">
-                {product.type} · draft only
+                {product.type === 'draft' || product.draft?.unsent
+                  ? 'draft · unsent'
+                  : `${product.type} · preview only`}
               </span>
             </div>
             <pre className="px-4 py-3 text-[12.5px] leading-relaxed text-[#a8a8b8] whitespace-pre-wrap font-sans">

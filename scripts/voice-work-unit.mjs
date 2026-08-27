@@ -9,6 +9,11 @@ import {
   classifyWorkKind,
   computeMissingBriefFields,
   validatePlanStructure,
+  validateActRequest,
+  detectNamedProductionRepo,
+  resolveActKind,
+  buildReceipt,
+  executeActLocal,
 } from '../api/voice-work.js'
 import { buildDiscussSystem } from '../api/prompts.js'
 
@@ -117,6 +122,66 @@ assert('reject BUILD without fileScaffold', validatePlanStructure({
 
 const missing = computeMissingBriefFields({ who: 'a', job: 'b' })
 assert('computeMissing finds multiple gaps', missing.length > 2)
+
+// ── Act + Receipts ───────────────────────────────────────────────────────────
+
+const readyDraftRefine = {
+  kind: 'DRAFT',
+  ready: true,
+  brief: {
+    who: 'Seller',
+    job: 'Inspection timeline email',
+    surfaces: ['pane'],
+    data: { real: [], neverInvent: ['listings'] },
+    v1: ['one email'],
+    notV1: ['send'],
+    tools: { stackOrConnectors: [], wired: [], notWired: ['Gmail'] },
+    done: 'Unsent draft in pane',
+    hardThing: 'Tone',
+    consequence: 'preview only',
+  },
+  optimizedPrompt: 'Draft a friendly email about inspection timeline.',
+}
+
+const notReady = validateActRequest({ kind: 'DRAFT', ready: false, brief: { who: 'x' } })
+assert('act rejects !ready', notReady.ok === false)
+
+const readyAct = validateActRequest(readyDraftRefine)
+assert('act accepts ready brief', readyAct.ok === true)
+
+const namedRepoRefine = {
+  ...readyDraftRefine,
+  kind: 'BUILD',
+  optimizedPrompt: 'Update kipparchibald.com homepage hero',
+  brief: { ...readyDraftRefine.brief, v1: ['kipparchibald.com hero'] },
+}
+const named = detectNamedProductionRepo(namedRepoRefine)
+assert('detects kipparchibald.com', named?.name === 'kipparchibald.com')
+const resolved = resolveActKind(namedRepoRefine)
+assert('named-repo BUILD flips to ROUTE', resolved.effectiveKind === 'ROUTE')
+assert('named-repo routes to Sites', resolved.desk === 'Sites')
+
+const draftAct = executeActLocal(readyDraftRefine, { userIntent: 'do this' })
+assert('DRAFT act returns work product', draftAct.ok === true && draftAct.workProduct?.type === 'draft')
+assert('DRAFT has unsent:true', draftAct.workProduct?.draft?.unsent === true)
+
+const sendReceipt = buildReceipt({
+  effectiveKind: 'DRAFT',
+  userAskedSend: true,
+  seconds: 20,
+})
+assert('send ask sets sendBlocked', sendReceipt.sendBlocked === true)
+assert('receipt willNot includes send', sendReceipt.willNot.includes('send'))
+
+const toyBuild = {
+  ...readyDraftRefine,
+  kind: 'BUILD',
+  optimizedPrompt: 'Build a habit tracker for founders',
+  brief: { ...readyDraftRefine.brief, v1: ['streak UI'] },
+}
+const toyAct = executeActLocal(toyBuild, {})
+assert('toy BUILD action is BUILD', toyAct.action === 'BUILD')
+assert('toy BUILD has buildPrompt', typeof toyAct.buildPrompt === 'string' && toyAct.buildPrompt.length > 0)
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
