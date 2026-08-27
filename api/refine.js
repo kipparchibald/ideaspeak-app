@@ -5,11 +5,9 @@ import {
   getOrCreateRequestId,
   requestIdHeaders,
 } from './observability.js'
+import { REFINE_SYSTEM, guardRefineResult } from './voice-work.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
-
-const REFINE_SYSTEM = `You are the IdeaSpeak Voice Refiner. Elevate raw spoken transcripts into structured briefs.
-Output ONLY valid JSON: { "brief": { "vision": "...", "users": "...", "keyFeatures": ["..."], "tech": "..." }, "optimizedPrompt": "..." }`
 
 export default async function handler(req) {
   const requestId = getOrCreateRequestId(req)
@@ -65,7 +63,8 @@ export default async function handler(req) {
   }
 
   const content = data.choices?.[0]?.message?.content || ''
-  const parsed = parseJsonFromContent(content)
+  const raw = parseJsonFromContent(content)
+  const parsed = guardRefineResult(raw)
 
   return new Response(JSON.stringify({ content, parsed, requestId }), {
     headers: { ...baseHeaders, ...rateHeaders, 'Content-Type': 'application/json' },

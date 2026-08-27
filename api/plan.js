@@ -1,6 +1,7 @@
 import { PLAN_SYSTEM } from './plan-prompt.js'
 import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
 import { corsHeaders, rejectBlockedOrigin } from './security.js'
+import { validatePlanStructure } from './voice-work.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
 
@@ -20,7 +21,7 @@ export default async function handler(req) {
     })
   }
 
-  const { conversation = [], personality = 'grok' } = await req.json()
+  const { conversation = [], personality = 'grok', kind = 'BUILD' } = await req.json()
   const transcript = conversation
     .filter((m) => m.role && m.content)
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
@@ -33,7 +34,7 @@ export default async function handler(req) {
     })
   }
 
-  const user = `Conversation to synthesize into a multi-agent build plan:\n\n${transcript}\n\nPersonality tone for optimizedPrompt: ${personality}`
+  const user = `Conversation to synthesize into a multi-agent plan:\n\n${transcript}\n\nWork kind hint: ${kind}\nPersonality tone for optimizedPrompt: ${personality}`
 
   const { ok, data } = await chatCompletion(apiKey, {
     messages: [
@@ -54,10 +55,11 @@ export default async function handler(req) {
 
   const content = data.choices?.[0]?.message?.content || ''
   const parsed = parseJsonFromContent(content)
+  const validation = validatePlanStructure(parsed)
 
-  if (!parsed?.fileScaffold || !parsed?.agents?.length) {
+  if (!validation.valid) {
     return new Response(
-      JSON.stringify({ error: 'Plan agent returned invalid structure — try again', content }),
+      JSON.stringify({ error: `Plan agent returned invalid structure — ${validation.error}`, content }),
       { status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' } }
     )
   }

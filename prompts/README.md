@@ -4,8 +4,9 @@ These prompts are designed to make the IdeaSpeak voice + build experience **sign
 
 ## Files
 
-- `IdeaSpeak-xAI-Agent-System-Prompt.md` — The main system prompt for the coding/build agent (use this with xAI/Grok models for the core builder on ideaspeak.dev).
-- `IdeaSpeak-Voice-Refiner-Prompt.md` — The critical pre-processing layer. Turns raw, messy voice transcripts into rich, structured, high-signal briefs + an optimized prompt for the build agent. This layer alone makes IdeaSpeak feel magical from the first spoken word.
+- `IdeaSpeak-Voice-Work-Prompt.md` — **Planning + work source of truth** for discuss, refine, and plan. Covers BUILD, DESK, RESEARCH, DRAFT, and ROUTE kinds with the complete-brief gate (CLASSIFY → CLEAN → FILL → PUSH → GATE → ACT).
+- `IdeaSpeak-xAI-Agent-System-Prompt.md` — The main system prompt for the coding/build agent (use this with xAI/Grok models for the core builder on ideaspeak.dev). Used **after** the user agrees to build.
+- `IdeaSpeak-Voice-Refiner-Prompt.md` — Legacy pre-processing layer for BUILD-only briefs. Superseded by Voice Work for planning; still referenced for post-agree build elevation.
 - `Lovable-Optimized-Refined-Prompt.md` — If you are still (or also) bridging to Lovable via the Chrome extension, use this to generate the prompt that gets auto-injected. It produces dramatically better Lovable output than raw speech.
 
 ## Why This Beats Lovable
@@ -23,24 +24,20 @@ IdeaSpeak with these prompts + xAI:
 
 ## Recommended Architecture on the Website
 
-1. **Voice capture** (browser SpeechRecognition or better custom) → raw transcript + audio context if available.
-2. **Voice Refiner** (this prompt, fast xAI model) → structured brief + "Prompt for Build Agent".
-3. **Main IdeaSpeak xAI Build Agent** (the big system prompt) + full tool suite:
-   - File system tools (read, precise edit, create, search, etc.)
-   - Sandbox terminal (install, build, typecheck, logs)
-   - Preview iframe control + console/network inspection
-   - Web search + real-time info
-   - xAI vision (analyze user screenshots or "see" the preview)
-   - xAI image generation for custom assets/logos/illustrations (no placeholders)
-4. Live preview + chat/voice feedback loop.
-5. One-click export GitHub + deploy (Vercel or other).
-6. Optional: "Send to Lovable" button using the bridge for users who want to compare or continue there.
+1. **Voice capture** (browser SpeechRecognition or Grok Voice realtime) → raw transcript + history.
+2. **Voice Work Refiner** (`IdeaSpeak-Voice-Work-Prompt.md` via `/api/refine`) → structured brief with `kind`, `ready`, `missing`, `spoken`, `optimizedPrompt`.
+3. **Discuss** (`/api/discuss` with Voice Work prompts) → collaborative planning until brief is complete; user says **Do this** / **Build this**.
+4. **Plan** (`/api/plan`) → BUILD gets `fileScaffold`; WORK kinds get `workProducts`.
+5. **Main IdeaSpeak xAI Build Agent** (the big system prompt) for BUILD only, after gate opens — file tools, sandbox, preview, vision, export.
+6. **Live preview** (BUILD) or **work-product pane** (DESK/DRAFT/RESEARCH/ROUTE) + voice feedback loop.
+7. One-click export GitHub + deploy (Vercel or other).
+8. Optional: "Send to Lovable" button using the bridge for users who want to compare or continue there.
 
 ## Quick Start
 
 - Copy the Agent System Prompt into your main builder agent's system message.
-- Implement (or call xAI with) the Voice Refiner on every voice submission.
-- Feed the refiner's output + full history + current project context (file tree + key files + errors) into the agent.
+- Wire `/api/refine` with `IdeaSpeak-Voice-Work-Prompt.md` on every planning turn.
+- Gate Build/Do on `refine.ready` — never act on mushy briefs.
 - Give the agent powerful parallel tool calling and the platform primitives (edit code → instantly see in preview).
 - For the Lovable bridge path: run the refiner (or the Lovable-specific version) and send the resulting optimized prompt via `sendToLovable()`.
 
