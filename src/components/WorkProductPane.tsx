@@ -1,4 +1,4 @@
-import { FileText, ListChecks, Search, ArrowRightLeft, Mail } from 'lucide-react'
+import { FileText, ListChecks, Search, ArrowRightLeft, Mail, Inbox } from 'lucide-react'
 import type { WorkProduct } from '../lib/voice-work'
 
 interface WorkProductPaneProps {
@@ -13,7 +13,8 @@ const TYPE_ICONS = {
   brief: FileText,
   handoff: ArrowRightLeft,
   research: Search,
-} as const
+  desk: Inbox,
+} as const satisfies Record<WorkProduct['type'], typeof FileText>
 
 export function WorkProductPane({ products, kind, isDrafting = false }: WorkProductPaneProps) {
   if (products.length === 0 && !isDrafting) {

@@ -240,26 +240,6 @@ function replySignalsBuildHandoff(text: string): boolean {
   return false
 }
 
-/** Compile conversation into a build brief so generation uses the plan, not one utterance */
-function compilePlanBrief(messages: ChatMessage[]): string {
-  const users = messages.filter((m) => m.role === 'user').map((m) => m.content)
-  const assistants = messages
-    .filter((m) => m.role === 'assistant')
-    .slice(1)
-    .map((m) => m.content)
-  return [
-    'Build a live v1 from this collaborative plan:',
-    '',
-    '## User direction',
-    ...users.map((u, i) => `${i + 1}. ${u}`),
-    '',
-    '## Co-founder notes (from planning)',
-    ...assistants.slice(-4).map((a) => `- ${a}`),
-    '',
-    'Ship one tight vertical slice: primary user, core loop, wow moment, premium dark UI. Interactive and complete enough to click through.',
-  ].join('\n')
-}
-
 /** Flatten { path: { code } } or { path: string } → Sandpack files */
 function toSandpackFiles(
   files: Record<string, string | { code: string }>,
@@ -2003,6 +1983,8 @@ export default function App() {
     setMode('build')
     void sendMessage(isBuildKind(voiceRefine.kind) ? 'build it' : 'do this', 'build')
   }
+
+  const lastUserIdea = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
 
   const sessionTranscript = messages
     .map((m) => `${m.role}: ${m.content}`)
