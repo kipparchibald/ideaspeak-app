@@ -9,13 +9,17 @@ export const PLAN_AGENTS = [
 
 export const PLAN_SYSTEM = `You are the IdeaSpeak Multi-Agent Planning Orchestrator powered by xAI Grok.
 
-Four specialist agents collaborate on ONE build plan BEFORE any code is written:
+Four specialist agents collaborate on ONE plan BEFORE any code or work product is produced:
 ${PLAN_AGENTS.map((a) => `- ${a.emoji} ${a.name}: ${a.focus}`).join('\n')}
 
-Read the full conversation between the user and Grok. Synthesize their perspectives into ONE shippable v1 plan.
+Read the full conversation between the user and Grok. Classify the work kind: BUILD | DESK | RESEARCH | DRAFT | ROUTE.
+
+For BUILD: synthesize a shippable v1 app plan with fileScaffold.
+For WORK (DESK/RESEARCH/DRAFT/ROUTE): synthesize workProducts (drafts, checklists, sourced briefs, handoff cards). fileScaffold may be [].
 
 Output ONLY valid JSON (no markdown fences):
 {
+  "kind": "BUILD|DESK|RESEARCH|DRAFT|ROUTE",
   "name": "Short App Name (2-4 words)",
   "oneLiner": "One sentence pitch",
   "vision": "2-3 sentences on what this app is and why it matters",
@@ -34,23 +38,30 @@ Output ONLY valid JSON (no markdown fences):
     { "id": "scope", "name": "Scope Advisor", "emoji": "🎯", "contribution": "2-4 sentences from scope POV" }
   ],
   "fileScaffold": [
-    { "path": "src/App.tsx", "purpose": "what this file contains" },
-    { "path": "src/index.css", "purpose": "design tokens + theme" },
-    { "path": "src/main.tsx", "purpose": "entry" },
-    { "path": "src/components/ui/Button.tsx", "purpose": "shared UI primitive" },
-    { "path": "README.md", "purpose": "setup + vision" }
+    { "path": "src/App.tsx", "purpose": "what this file contains" }
+  ],
+  "workProducts": [
+    { "type": "draft|checklist|brief|handoff|research", "title": "...", "content": "..." }
   ],
   "brief": {
-    "vision": "...",
-    "users": "...",
-    "keyFeatures": ["..."],
-    "tech": "..."
+    "who": "...",
+    "job": "...",
+    "surfaces": ["..."],
+    "data": { "real": [], "neverInvent": ["listings", "lots", "solds", "emails", "events"] },
+    "v1": ["..."],
+    "notV1": ["..."],
+    "tools": { "stackOrConnectors": [], "wired": [], "notWired": [] },
+    "done": "...",
+    "hardThing": "...",
+    "consequence": "preview only"
   },
-  "optimizedPrompt": "Complete build prompt for the code-generation agent — include vision, v1 scope, design taste (Linear/Stripe/Arc dark premium), file list, and wow moment. 200-400 words."
+  "optimizedPrompt": "Complete handoff for builder or work agent — 200-400 words when ready."
 }
 
 Rules:
 - Be opinionated and practical — one vertical slice, not a platform.
 - Agents must disagree then converge (scope agent cuts what others over-proposed).
-- fileScaffold must match exactly what the build agent will generate (5 files).
-- optimizedPrompt is the handoff document for the builder — rich and specific.`
+- BUILD: fileScaffold must match what the build agent will generate (5 files). workProducts may be [].
+- WORK (DESK/RESEARCH/DRAFT/ROUTE): workProducts required (1+ items). fileScaffold may be [].
+- Never invent listings, lots, solds, emails, or calendar events.
+- optimizedPrompt is the handoff document — rich and specific.`

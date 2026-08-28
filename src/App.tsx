@@ -32,6 +32,20 @@ import { discussWithGrok, generateWithLLM } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import { verifyXaiKey, loadLocalXaiKey as loadKey } from './lib/api-verify'
 import { simulateVoiceRefiner, prepareExportPreviewFiles, validateExportScaffold } from './lib/build-tools'
+import {
+  EMPTY_REFINE,
+  isBuildKind,
+  refineTranscript,
+  statusLabelForKind,
+  callAct,
+  actWorkProductToPane,
+  shouldShowSandpackAfterAct,
+  type VoiceWorkRefine,
+  type WorkProduct,
+  type ActReceipt,
+} from './lib/voice-work'
+import { LivingBriefCard } from './components/LivingBriefCard'
+import { WorkProductPane } from './components/WorkProductPane'
 import { formatUserFacingApiError, stripRequestRef } from './lib/api-errors'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
@@ -190,11 +204,11 @@ const BUILD_CHIPS = [
   'Voice notes → roadmap app',
 ]
 
-/** Explicit green-light to leave planning and generate the live preview */
+/** Explicit green-light to leave planning and act (build or work) */
 function wantsBuild(text: string): boolean {
   const t = text.toLowerCase().trim()
   return (
-    /\b(build it|build this|let'?s build|start building|ready to build|go ahead and build|ship it|generate (the )?app|lock it in and build)\b/.test(
+    /\b(do this|do it|let'?s do this|build it|build this|let'?s build|start building|ready to build|go ahead and build|ship it|generate (the )?app|lock it in and build)\b/.test(
       t,
     ) ||
     t === 'build' ||
@@ -202,9 +216,9 @@ function wantsBuild(text: string): boolean {
   )
 }
 
-/** Agent thinks the plan is solid enough */
+/** Agent thinks the brief is complete enough to act */
 function replySignalsPlanReady(text: string): boolean {
-  return /\b(ready to build|say build|plan (feels |is )?(solid|locked|good enough)|when you want the live preview|hit build)\b/i.test(
+  return /\b(do this|ready to build|say build|brief (is )?(complete|locked|solid)|when you want the live preview|hit build)\b/i.test(
     text,
   )
 }
@@ -224,26 +238,6 @@ function replySignalsBuildHandoff(text: string): boolean {
   }
   if (/\b(compiling|materializing|generating).{0,20}\b(preview|app|build)\b/.test(t)) return true
   return false
-}
-
-/** Compile conversation into a build brief so generation uses the plan, not one utterance */
-function compilePlanBrief(messages: ChatMessage[]): string {
-  const users = messages.filter((m) => m.role === 'user').map((m) => m.content)
-  const assistants = messages
-    .filter((m) => m.role === 'assistant')
-    .slice(1)
-    .map((m) => m.content)
-  return [
-    'Build a live v1 from this collaborative plan:',
-    '',
-    '## User direction',
-    ...users.map((u, i) => `${i + 1}. ${u}`),
-    '',
-    '## Co-founder notes (from planning)',
-    ...assistants.slice(-4).map((a) => `- ${a}`),
-    '',
-    'Ship one tight vertical slice: primary user, core loop, wow moment, premium dark UI. Interactive and complete enough to click through.',
-  ].join('\n')
 }
 
 /** Flatten { path: { code } } or { path: string } → Sandpack files */
@@ -553,6 +547,14 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('discuss')
   const [messages, setMessages] = useState<ChatMessage[]>(defaultChatMessages)
   const [planReady, setPlanReady] = useState(false)
+  const [voiceRefine, setVoiceRefine] = useState<VoiceWorkRefine>(EMPTY_REFINE)
+  const [workProducts, setWorkProducts] = useState<WorkProduct[]>([])
+  const [isDraftingWork, setIsDraftingWork] = useState(false)
+  const [actReceipt, setActReceipt] = useState<ActReceipt | null>(null)
+  const [effectiveActKind, setEffectiveActKind] = useState<string>('BUILD')
+  const [acting, setActing] = useState(false)
+  const voiceRefineRef = useRef(voiceRefine)
+  voiceRefineRef.current = voiceRefine
   const voiceTurnRef = useRef(false)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -1261,6 +1263,24 @@ export default function App() {
     window.setTimeout(() => setPreviewFlash(false), 2800)
   }, [])
 
+  /** Run Voice Work refine after each planning turn */
+  const runRefineAfterTurn = useCallback(
+    async (history: ChatMessage[]) => {
+      const users = history.filter((m) => m.role === 'user')
+      if (users.length === 0) return
+      const transcript = users.map((m) => m.content).join('\n')
+      const result = await refineTranscript(
+        transcript,
+        history.slice(-4).map((m) => ({ role: m.role, content: m.content })),
+      )
+      if (result?.parsed) {
+        setVoiceRefine(result.parsed)
+        setPlanReady(result.parsed.ready)
+      }
+    },
+    [],
+  )
+
   /** Always produce a runnable preview — local scaffold first (instant), Grok optional upgrade */
   const materializeApp = useCallback(
     async (idea: string, history: ChatMessage[]) => {
@@ -1299,6 +1319,10 @@ export default function App() {
       let brief: Record<string, unknown> = {
         ...(sim.brief as Record<string, unknown>),
         original: idea,
+      }
+      const refine = voiceRefineRef.current
+      if (refine.ready && refine.optimizedPrompt) {
+        brief = { ...brief, optimizedPrompt: refine.optimizedPrompt, voiceWorkBrief: refine.brief }
       }
       let plan =
         'Your app is live in the Preview panel. Click around, then Ship or refine by voice.'
@@ -1506,6 +1530,77 @@ export default function App() {
     [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],
   )
 
+  /** GATE → RECEIPT → ACT → SHOW */
+  const runAct = useCallback(
+    async (history: ChatMessage[], refine: VoiceWorkRefine, userIntent: string) => {
+      setActing(true)
+      setIsDraftingWork(true)
+      setShowWorkspace(true)
+      setMobilePanel('app')
+      setWorkspaceTab('preview')
+
+      const result = await callAct({
+        refine,
+        userIntent,
+        history: history.map((m) => ({ role: m.role, content: m.content })),
+      })
+
+      if (!result || result.error) {
+        setActing(false)
+        setIsDraftingWork(false)
+        toast.message('Brief not complete', {
+          description: result?.error || result?.missing?.join(', ') || 'Fill the brief first.',
+        })
+        return
+      }
+
+      setActReceipt(result.receipt)
+      setEffectiveActKind(result.effectiveKind)
+      void narrate(result.receipt.spoken, { force: true, voiceMode: true })
+
+      if (result.action === 'BUILD' && result.buildPrompt) {
+        setActing(false)
+        setIsDraftingWork(false)
+        const built = await materializeApp(result.buildPrompt, history)
+        const planText = sanitizeBuildTalk(built.plan || '')
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content:
+            (result.spokenFinish || 'Live preview is up on the right.') +
+            (planText ? `\n\n${planText}` : ''),
+          timestamp: Date.now(),
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+        if (result.spokenFinish) {
+          void narrate(result.spokenFinish, { force: true, voiceMode: true })
+        }
+        return built
+      }
+
+      if (result.workProduct) {
+        setWorkProducts(actWorkProductToPane(result.workProduct))
+        toast.success('Work product ready', {
+          description: result.receipt.sendBlocked
+            ? 'You asked to send — outbound is off. Draft only.'
+            : 'Preview only — nothing sent.',
+        })
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: result.spokenFinish || `${result.effectiveKind} work is in the pane — draft only.`,
+          timestamp: Date.now(),
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+        if (result.spokenFinish) {
+          void narrate(result.spokenFinish, { force: true, voiceMode: true })
+        }
+      }
+
+      setActing(false)
+      setIsDraftingWork(false)
+    },
+    [materializeApp, narrate],
+  )
+
   const sendMessage = useCallback(
     async (text?: string, modeOverride?: Mode, opts?: { force?: boolean; voiceHandoff?: boolean }) => {
       const content = (text || input).trim()
@@ -1518,13 +1613,21 @@ export default function App() {
       } else if (wantsBuild(content)) {
         activeMode = 'build'
         setMode('build')
-        setPlanReady(true)
+        if (voiceRefineRef.current.ready) setPlanReady(true)
       } else if (activeMode === 'build' && !planReady && !wantsBuild(content)) {
         // User is in Build tab but still ideating — keep collaborating
         activeMode = 'discuss'
       }
 
       const isBuildIntent = activeMode === 'build' || wantsBuild(content)
+      if (isBuildIntent && !voiceRefineRef.current.ready) {
+        toast.message('Brief not complete yet', {
+          description: `Still need: ${voiceRefineRef.current.missing.slice(0, 3).join(', ')}${voiceRefineRef.current.missing.length > 3 ? '…' : ''}`,
+        })
+        setIsLoading(false)
+        if (isBuildIntent) setIsBuilding(false)
+        return
+      }
       if (isLoading && !opts?.force && !isBuildIntent) {
         toast.message('Still working on the last turn…')
         return
@@ -1614,11 +1717,12 @@ export default function App() {
           }
           setMessages((prev) => [...prev, assistantMsg])
 
-          const userCount = nextHistory.filter((m) => m.role === 'user').length
-          if (replySignalsPlanReady(reply) || userCount >= 3) {
+          void runRefineAfterTurn([...nextHistory, assistantMsg])
+
+          if (replySignalsPlanReady(reply) && voiceRefineRef.current.ready) {
             setPlanReady(true)
           }
-          if (fromVoice && replySignalsBuildHandoff(reply)) {
+          if (fromVoice && replySignalsBuildHandoff(reply) && voiceRefineRef.current.ready) {
             kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
 
@@ -1627,26 +1731,10 @@ export default function App() {
             void narrate(reply, { force: true, voiceMode: true })
           }
         } else {
-          // Build from the full plan, not a single half-sentence
-          const buildBrief = compilePlanBrief(nextHistory)
-          const built = await materializeApp(buildBrief, nextHistory)
-          const planText = sanitizeBuildTalk(built.plan || '')
-          const assistantMsg: ChatMessage = {
-            role: 'assistant',
-            content:
-              `Live preview is up for “${built.name || 'your app'}” on the right.\n\n` +
-              (planText || 'Click through it, then refine by voice or open Ship when you’re ready.'),
-            timestamp: Date.now(),
-          }
-          setMessages((prev) => [...prev, assistantMsg])
-          const doneLine = `${built.name || 'Your app'} is live in the preview. Tell me what to change, or open Ship when you're ready.`
-          if (voiceBuildHandoffRef.current || grokAgentRef.current?.isConnected()) {
-            grokAgentRef.current?.speakLine(
-              `Celebrate briefly — tell the user "${built.name || 'their app'}" is live in the preview on the right and they can click around or keep talking to refine. Two short sentences max.`,
-            )
+          const refine = voiceRefineRef.current
+          await runAct(nextHistory, refine, content)
+          if (voiceBuildHandoffRef.current) {
             voiceBuildHandoffRef.current = false
-          } else {
-            void narrate(doneLine, { force: fromVoice || ttsEnabled, voiceMode: true })
           }
         }
       } catch (err) {
@@ -1693,6 +1781,8 @@ export default function App() {
       stopVoice,
       kickVoiceBuild,
       materializeApp,
+      runAct,
+      runRefineAfterTurn,
     ],
   )
 
@@ -1746,10 +1836,16 @@ export default function App() {
           const content = text.trim()
           appendChatMessage({ role: 'user', content, timestamp: Date.now() })
           if (wantsBuild(content)) {
-            kickVoiceBuild('You said build — compiling the plan into a live preview.')
+            if (voiceRefineRef.current.ready) {
+              kickVoiceBuild('You said build — compiling the plan into a live preview.')
+            } else {
+              toast.message('Brief not complete yet', {
+                description: `Still need: ${voiceRefineRef.current.missing.slice(0, 3).join(', ')}`,
+              })
+            }
           } else {
             const n = messagesRef.current.filter((m) => m.role === 'user').length
-            if (n >= 3) setPlanReady(true)
+            if (n >= 3 && voiceRefineRef.current.ready) setPlanReady(true)
           }
         }
       },
@@ -1759,8 +1855,8 @@ export default function App() {
         if (isFinal) {
           const content = text.trim()
           appendChatMessage({ role: 'assistant', content, timestamp: Date.now() })
-          if (replySignalsPlanReady(content)) setPlanReady(true)
-          if (replySignalsBuildHandoff(content)) {
+          if (replySignalsPlanReady(content) && voiceRefineRef.current.ready) setPlanReady(true)
+          if (replySignalsBuildHandoff(content) && voiceRefineRef.current.ready) {
             kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
         }
@@ -1877,10 +1973,15 @@ export default function App() {
       })
       return
     }
+    if (!voiceRefine.ready) {
+      toast.message('Brief not complete', {
+        description: `Still need: ${voiceRefine.missing.join(', ')}`,
+      })
+      return
+    }
     setPlanReady(true)
     setMode('build')
-    // Explicit green light uses full conversation as brief
-    void sendMessage('build it', 'build')
+    void sendMessage(isBuildKind(voiceRefine.kind) ? 'build it' : 'do this', 'build')
   }
 
   const lastUserIdea = [...messages].reverse().find((m) => m.role === 'user')?.content || ''
@@ -2427,6 +2528,15 @@ export default function App() {
               />
             )}
 
+            {userTurns >= 1 && !hasBuilt && (
+              <LivingBriefCard
+                refine={voiceRefine}
+                isBuilding={isBuilding || isDraftingWork}
+                receipt={actReceipt}
+                acting={acting}
+              />
+            )}
+
             {isLoading && !isBuilding && !isUpgrading && buildProgress.log.length === 0 && (
               <div className="flex gap-2.5">
                 <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center bg-[#00ff88]/10 border border-[#00ff88]/20">
@@ -2456,24 +2566,28 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 className="pt-1 space-y-2"
               >
-                {planReady || userTurns >= 2 ? (
+                {voiceRefine.ready ? (
                   <button
                     onClick={startBuildFromPlan}
                     className="w-full flex items-center justify-between gap-3 rounded-xl border border-[#00ff88]/35 bg-[#00ff88]/10 hover:bg-[#00ff88]/15 px-4 py-3 transition-colors text-left"
                   >
                     <div>
                       <div className="text-[13px] font-semibold text-[#00ff88]">
-                        Build live preview from this plan
+                        {isBuildKind(voiceRefine.kind)
+                          ? 'Build live preview from this plan'
+                          : `Do this ${voiceRefine.kind} work`}
                       </div>
                       <div className="text-[11px] text-[#00ff88]/65 mt-0.5">
-                        Uses everything you planned together — not a restated one-liner
+                        Brief complete — say “Do this” or tap to proceed (draft only for work)
                       </div>
                     </div>
                     <Wand2 size={18} className="text-[#00ff88] shrink-0" />
                   </button>
                 ) : (
                   <div className="rounded-xl border border-[#1f1f27] bg-[#111116] px-3 py-2.5 text-[11px] text-[#666]">
-                    Keep planning by voice — when the v1 feels sharp, this becomes a Build button.
+                    {userTurns >= 1
+                      ? `Planning ${voiceRefine.kind.toLowerCase()} — still need: ${voiceRefine.missing.slice(0, 4).join(', ')}${voiceRefine.missing.length > 4 ? '…' : ''}`
+                      : 'Keep planning by voice — when the brief is complete, Build/Do unlocks.'}
                   </div>
                 )}
               </motion.div>
@@ -2567,7 +2681,7 @@ export default function App() {
               </div>
             )}
 
-            {planReady && !hasBuilt && userTurns > 0 && voiceStatus === 'idle' && (
+            {voiceRefine.ready && !hasBuilt && userTurns > 0 && voiceStatus === 'idle' && (
               <div className="flex flex-wrap gap-1.5 justify-center">
                 {BUILD_CHIPS.map((q) => (
                   <button
@@ -2761,9 +2875,12 @@ export default function App() {
             <p className="text-[10.5px] text-[#3a3a45] text-center px-2">
               {hasBuilt
                 ? 'Preview is live · refine by voice or open Ship'
-                : planReady
-                  ? 'Plan ready · say “build it” or tap the green Build button'
-                  : 'Plan mode · voice co-founder · build only when you green-light'}
+                : voiceRefine.ready
+                  ? isBuildKind(voiceRefine.kind)
+                    ? 'Brief ready · say “build it” or tap Build'
+                    : `Brief ready · say “Do this” for ${voiceRefine.kind.toLowerCase()} work`
+                  : statusLabelForKind(voiceRefine.kind, false, isLoading && !isBuilding)
+                    + ' · complete the brief before Build/Do'}
             </p>
           </div>
         </section>
@@ -3089,17 +3206,25 @@ export default function App() {
                   </div>
                 )}
               <Suspense fallback={<SandpackLoadingFallback />}>
-                <PreviewEditWorkspace
-                  previewRevision={previewRevision}
-                  workspaceTab={workspaceTab}
-                  hasBuilt={hasBuilt}
-                  files={generatedFiles}
-                  visibleFiles={visibleSandpackFiles}
-                  previewEngine={previewEngine}
-                  onFilesChange={handlePreviewFilesChange}
-                  localPreviewSrc={localPreviewSrc}
-                  sandboxPreviewSrc={sandboxPreviewSrc}
-                />
+                {!shouldShowSandpackAfterAct(effectiveActKind, hasBuilt) ? (
+                  <WorkProductPane
+                    products={workProducts}
+                    kind={effectiveActKind}
+                    isDrafting={isDraftingWork || acting}
+                  />
+                ) : (
+                  <PreviewEditWorkspace
+                    previewRevision={previewRevision}
+                    workspaceTab={workspaceTab}
+                    hasBuilt={hasBuilt}
+                    files={generatedFiles}
+                    visibleFiles={visibleSandpackFiles}
+                    previewEngine={previewEngine}
+                    onFilesChange={handlePreviewFilesChange}
+                    localPreviewSrc={localPreviewSrc}
+                    sandboxPreviewSrc={sandboxPreviewSrc}
+                  />
+                )}
               </Suspense>
             </div>
           </section>
