@@ -1,16 +1,16 @@
 /** Shared xAI client for Edge API routes */
 
 import { jsonrepair } from 'jsonrepair'
+import { chatModel, buildModel } from './model-defaults.js'
+import { normalizeReasoningEffort, REASONING_BUILD } from './reasoning.js'
 
 export const MODELS = {
   /**
-   * Economics + quality (see api/model-strategy.js):
-   * - chat  → grok-4.5        short turns, flagship plan quality
-   * - build → grok-build-0.1  specialist codegen, ~3× cheaper than 4.5 on scaffolds
-   * - fallback build → grok-4.5 only if build model unavailable
+   * grok-4.6 — flagship reasoning for plan/discuss/refine + live preview codegen.
+   * Override with XAI_CHAT_MODEL / XAI_BUILD_MODEL (e.g. grok-build-0.1 for specialist codegen).
    */
-  chat: process.env.XAI_CHAT_MODEL || 'grok-4.5',
-  build: process.env.XAI_BUILD_MODEL || 'grok-build-0.1',
+  chat: chatModel(),
+  build: buildModel(),
 }
 
 /** Chat Completions body for IdeaSpeak build (fallback path when Responses API unavailable) */
@@ -21,9 +21,9 @@ export function buildModelRequestBody({ messages, maxTokens = 12000, temperature
     max_tokens: maxTokens,
     temperature,
   }
-  // Only grok-4.x chat models accept reasoning_effort — grok-build-0.1 does not
+  // grok-4.x accepts reasoning_effort; grok-build-* specialist models do not
   if (String(MODELS.build).includes('grok-4') && !String(MODELS.build).includes('build')) {
-    body.reasoning_effort = 'low'
+    body.reasoning_effort = REASONING_BUILD
   }
   return body
 }
@@ -64,14 +64,14 @@ export function xaiError(data, fallback = 'xAI error') {
 }
 
 /**
- * Chat completion — grok-4.3 reasoning model.
+ * Chat completion — grok-4.6 reasoning model.
  * Never pass frequency_penalty / presence_penalty (rejected by reasoning models).
  */
 export async function chatCompletion(apiKey, {
   messages,
   maxTokens = 1200,
   temperature = 0.75,
-  reasoningEffort = 'low',
+  reasoningEffort = 'high',
 }) {
   const body = {
     model: MODELS.chat,
@@ -79,9 +79,7 @@ export async function chatCompletion(apiKey, {
     max_tokens: maxTokens,
     temperature,
   }
-  // Only attach reasoning_effort for models that support it (grok-4.5 rejects `none`)
-  const effort =
-    reasoningEffort === 'none' ? 'low' : reasoningEffort
+  const effort = normalizeReasoningEffort(reasoningEffort)
   if (effort && String(MODELS.chat).includes('grok-4')) {
     body.reasoning_effort = effort
   }
@@ -138,7 +136,7 @@ export async function pingXai(apiKey) {
     messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
     maxTokens: 8,
     temperature: 0,
-    // Omit reasoning_effort on ping — grok-4.5 rejects `none`; `low` is unnecessary for health check
+    // Omit reasoning_effort on ping — health check only
     reasoningEffort: undefined,
   })
 }

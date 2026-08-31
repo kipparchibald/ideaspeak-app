@@ -177,7 +177,7 @@ export class BuildProgressSession {
         ...common,
         ...(this.ctx.grokLive
           ? [
-              { text: `Calling Grok Build (${this.ctx.buildModel || 'grok-build-0.1'}) via Responses API…`, agent: 'Builder' },
+              { text: `Calling Grok Build (${this.ctx.buildModel || 'grok-4.6'}) via Responses API…`, agent: 'Builder' },
               { text: 'Model reasoning over vertical slice scope…', agent: 'Builder', headline: 'Grok is writing your app — live preview updates when files land.' },
               { text: 'Awaiting structured JSON (files + metadata)…', agent: 'Builder' },
             ]
@@ -197,7 +197,7 @@ export class BuildProgressSession {
       ...common,
       ...(this.ctx.grokLive
         ? [
-            { text: `Executing plan via ${this.ctx.buildModel || 'grok-build-0.1'}…`, agent: 'Builder' },
+            { text: `Executing plan via ${this.ctx.buildModel || 'grok-4.6'}…`, agent: 'Builder' },
             { text: 'Agents synchronized — Architect, UX, Engineer, Scope…', agent: 'Builder', headline: 'Grok is building your live preview — one pass, no swap.' },
             { text: 'Parsing agent JSON output…', agent: 'Engineer' },
           ]
@@ -217,7 +217,7 @@ export class BuildProgressSession {
   logBuildRequest() {
     this.push(
       this.ctx.grokLive
-        ? `Handoff → Grok build agent (${this.ctx.buildModel || 'grok-build-0.1'})`
+        ? `Handoff → Grok build agent (${this.ctx.buildModel || 'grok-4.6'})`
         : 'Handoff → local simulator',
       'Builder'
     )
@@ -248,7 +248,7 @@ export class BuildProgressSession {
     this.push(`Project: ${projectName}`, 'Grok Build')
     this.push(
       usedReal
-        ? `Powered by ${this.ctx.buildModel || 'grok-build-0.1'} + IdeaSpeak agents`
+        ? `Powered by ${this.ctx.buildModel || 'grok-4.6'} + IdeaSpeak agents`
         : 'Offline scaffold — add API key for live Grok Build',
       'Grok Build'
     )

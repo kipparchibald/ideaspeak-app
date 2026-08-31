@@ -15,7 +15,7 @@ interface ModeBadgeProps {
 
 export function ModeBadge({ hasApiKey, mode, compact = false, onOpenSettings }: ModeBadgeProps) {
   const liveTitle =
-    'Real Grok — Plan: Grok 4.5 · Build: grok-build-0.1. Voice, discuss, and codegen hit xAI.'
+    'Real Grok — Plan: Grok 4.6 · Build: grok-4.6. Voice, discuss, and codegen hit xAI.'
 
   const resolved: GrokMode = mode ?? (hasApiKey ? 'live' : 'simulator')
 

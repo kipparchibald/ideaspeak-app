@@ -1,5 +1,6 @@
 import { PLAN_SYSTEM } from './plan-prompt.js'
 import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
+import { REASONING_PLAN_LOCK } from './reasoning.js'
 import { corsHeaders, rejectBlockedOrigin } from './security.js'
 
 export const config = { runtime: 'edge', maxDuration: 60 }
@@ -42,7 +43,7 @@ export default async function handler(req) {
     ],
     temperature: 0.55,
     maxTokens: 4000,
-    reasoningEffort: 'low',
+    reasoningEffort: REASONING_PLAN_LOCK,
   })
 
   if (!ok) {

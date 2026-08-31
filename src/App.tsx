@@ -28,7 +28,7 @@ import {
   PencilLine,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
-import { discussWithGrok, generateWithLLM } from './lib/xai'
+import { discussWithGrok, generateWithLLM, GROK_BUILD_MODEL_LABEL } from './lib/xai'
 import type { XaiMessage } from './lib/xai'
 import { verifyXaiKey, loadLocalXaiKey as loadKey } from './lib/api-verify'
 import { simulateVoiceRefiner, prepareExportPreviewFiles, validateExportScaffold } from './lib/build-tools'
@@ -36,6 +36,7 @@ import { formatUserFacingApiError, stripRequestRef } from './lib/api-errors'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { ModeBadge, type GrokMode } from './components/ModeBadge'
+import { PlanCard } from './components/PlanCard'
 import { ApiSetupPanel } from './components/ApiSetupPanel'
 import { FinishSetupPanel } from './components/FinishSetupPanel'
 import { AccountPanel } from './components/AccountPanel'
@@ -274,7 +275,7 @@ function workspaceFilesToGenerated(
 }
 
 const DEFAULT_OPENER =
-  "Hey — I'm Grok. Tap the mic for a real voice call with me (not browser text-to-speech). We'll plan a ruthless v1, then you say build it for a live preview."
+  "Hey — I'm Grok. Tap the mic and talk — we'll shape a ruthless v1 together. I'll keep the plan card updated as we go. When it feels right, say build it and I'll spin up a live preview."
 
 function defaultChatMessages(): ChatMessage[] {
   return [{ role: 'assistant', content: DEFAULT_OPENER, timestamp: Date.now() }]
@@ -618,6 +619,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => loadKey())
   /** Verified live Grok (not just "key string present") */
   const [grokLive, setGrokLive] = useState(false)
+  const [serverBuildModel, setServerBuildModel] = useState(GROK_BUILD_MODEL_LABEL)
   const [grokStatusMsg, setGrokStatusMsg] = useState('')
   const [personality, setPersonality] = useState<Personality>('grok')
   // On by default so mic open + replies give spoken feedback
@@ -639,6 +641,34 @@ export default function App() {
         })
       }
     })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/capabilities')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.models?.build) return
+        setServerBuildModel(String(data.models.build))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/capabilities')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.models?.build) return
+        setServerBuildModel(String(data.models.build))
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -1305,7 +1335,7 @@ export default function App() {
       let source: 'grok' | 'local' = 'local'
       let name = String(brief.vision || idea).split(/[.!\n]/)[0].slice(0, 48).trim() || 'Your app'
 
-      const buildModel = 'grok-build-0.1'
+      const buildModel = serverBuildModel || GROK_BUILD_MODEL_LABEL
       const progress = beginBuildProgress(
         'plan',
         {
@@ -1503,7 +1533,7 @@ export default function App() {
         }
       }
     },
-    [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName],
+    [apiKey, personality, revealLivePreview, grokLive, activeWorkspaceId, lastBuildPlan, lastBuiltName, serverBuildModel],
   )
 
   const sendMessage = useCallback(
@@ -1584,7 +1614,7 @@ export default function App() {
             apiKey || loadKey() || undefined,
             null,
             personality,
-            true, // short, spoken, collaborative replies
+            fromVoice, // short spoken replies for voice; fuller text when typed
           )
           const reply = result.content
 
@@ -1615,11 +1645,8 @@ export default function App() {
           setMessages((prev) => [...prev, assistantMsg])
 
           const userCount = nextHistory.filter((m) => m.role === 'user').length
-          if (replySignalsPlanReady(reply) || userCount >= 3) {
+          if (replySignalsPlanReady(reply) || replySignalsBuildHandoff(reply) || userCount >= 3) {
             setPlanReady(true)
-          }
-          if (fromVoice && replySignalsBuildHandoff(reply)) {
-            kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
           }
 
           // Browser STT fallback only — realtime Grok Voice already spoke the reply
@@ -1760,9 +1787,7 @@ export default function App() {
           const content = text.trim()
           appendChatMessage({ role: 'assistant', content, timestamp: Date.now() })
           if (replySignalsPlanReady(content)) setPlanReady(true)
-          if (replySignalsBuildHandoff(content)) {
-            kickVoiceBuild('Grok handed off to the builder — watch the preview panel.')
-          }
+          // Grok may suggest building — wait for explicit "build it" from the user
         }
       },
       onReconnecting: () => {
@@ -2374,6 +2399,17 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          <PlanCard
+            messages={messages}
+            planReady={planReady}
+            voiceActive={
+              voiceStatus === 'listening' ||
+              voiceStatus === 'connecting' ||
+              voiceStatus === 'thinking' ||
+              voiceStatus === 'speaking'
+            }
+          />
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-3.5 scroll-smooth">
