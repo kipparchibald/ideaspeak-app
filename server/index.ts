@@ -7,6 +7,12 @@ import {
   shouldRateLimit,
 } from '../api/security.js'
 import { parseJsonFromContent } from '../api/xai.js'
+import { chatModel, buildModel } from '../api/model-defaults.js'
+import {
+  normalizeReasoningEffort,
+  REASONING_CONVERSATION,
+  resolveDiscussReasoningEffort,
+} from '../api/reasoning.js'
 import {
   bunErrorJson,
   getOrCreateRequestId,
@@ -37,8 +43,8 @@ try {
 
 const XAI_API = 'https://api.x.ai/v1/chat/completions'
 const XAI_REALTIME_SECRETS = 'https://api.x.ai/v1/realtime/client_secrets'
-const CHAT_MODEL = process.env.XAI_CHAT_MODEL || 'grok-4.5'
-const BUILD_MODEL = process.env.XAI_BUILD_MODEL || 'grok-build-0.1'
+const CHAT_MODEL = chatModel()
+const BUILD_MODEL = buildModel()
 
 type FeatureFlags = {
   xai: boolean
@@ -120,8 +126,7 @@ async function callXaiProxy(
     temperature: opts.temperature ?? 0.85,
     max_tokens: opts.maxTokens ?? 800,
   }
-  const effort =
-    opts.reasoningEffort === 'none' ? 'low' : opts.reasoningEffort
+  const effort = normalizeReasoningEffort(opts.reasoningEffort)
   if (effort && String(model).includes('grok-4')) {
     body.reasoning_effort = effort
   }
@@ -430,7 +435,12 @@ const server = serve({
         const refinerPrompt = await loadPrompt('IdeaSpeak-Voice-Refiner-Prompt.md')
         const system = refinerPrompt + '\n\nOutput ONLY valid JSON: { "brief": { "vision": "...", "users": "...", "keyFeatures": ["..."], "tech": "..." }, "optimizedPrompt": "full prompt for agent" }'
         const user = `Raw transcript: ${transcript}\nHistory: ${history.slice(-2).map((h: any) => h.content).join(' | ')}`
-        const content = await callXaiProxy([{ role: 'system', content: system }, { role: 'user', content: user }], apiKey)
+        const content = await callXaiProxy(
+          [{ role: 'system', content: system }, { role: 'user', content: user }],
+          apiKey,
+          CHAT_MODEL,
+          { reasoningEffort: REASONING_CONVERSATION },
+        )
         const parsed = parseJsonFromContent(content)
         return Response.json({ content, parsed, requestId }, { headers })
       } catch (e: any) {
@@ -534,6 +544,7 @@ ${transcript || ''}`
         const raw = await callXaiProxy(fullMessages, apiKey, CHAT_MODEL, {
           temperature: isVoice ? 0.95 : 0.85,
           maxTokens: isVoice ? 180 : 900,
+          reasoningEffort: resolveDiscussReasoningEffort(messages),
         })
         let content = raw
         if (isVoice) content = humanizeVoiceReply(content)

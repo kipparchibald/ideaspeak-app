@@ -73,8 +73,9 @@ export function buildLocalEnvSnippet(missing: string[]): string {
   ]
   if (missing.includes('XAI_API_KEY')) {
     lines.push('XAI_API_KEY=xai-your-key-here')
-    lines.push('# XAI_CHAT_MODEL=grok-4.5')
-    lines.push('# XAI_BUILD_MODEL=grok-build-0.1')
+    lines.push('# XAI_CHAT_MODEL=grok-4.6')
+    lines.push('# XAI_BUILD_MODEL=grok-4.6')
+    lines.push('# XAI_BUILD_MODEL=grok-build-0.1  # optional specialist override')
 
   }
   if (missing.includes('E2B_API_KEY')) {
@@ -121,12 +122,12 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
   const items: CapabilityItem[] = [
     {
       id: 'grok',
-      label: 'Grok stack (4.5 plan · Build codegen)',
+      label: 'Grok stack (4.6 plan · build)',
       status: grokLive ? 'ready' : hasClientKey ? 'partial' : 'missing',
       detail: grokLive
         ? `${grok.message}${grok.model ? ` · ${grok.model}` : ''}`
         : 'Set XAI_API_KEY on Vercel/Railway or paste key in Settings',
-      unlocks: 'Grok 4.5 plan/chat · Grok Build previews · refine · TTS · image',
+      unlocks: 'Grok 4.6 plan/chat · live preview codegen · refine · TTS · image',
 
       envVars: ['XAI_API_KEY'],
       links: [
@@ -149,7 +150,7 @@ export async function fetchPlatformCapabilities(): Promise<PlatformCapabilitiesR
       label: 'Grok Build live preview',
       status: grokLive ? 'ready' : 'missing',
       detail: grokLive
-        ? `Grok Build ${server?.models?.build || 'grok-build-0.1'} · best $/quality (~3× cheaper than 4.5 on scaffolds)`
+        ? `Grok Build ${server?.models?.build || 'grok-4.6'} · grok-4.6 reasoning for live preview codegen`
         : 'Without API key → local template scaffold only',
       unlocks: 'AI-generated preview via Grok Build (not template swap)',
       envVars: ['XAI_API_KEY', 'XAI_BUILD_MODEL'],

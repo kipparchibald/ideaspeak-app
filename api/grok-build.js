@@ -1,14 +1,15 @@
 /**
  * Grok Build — xAI coding model via Responses API (+ chat completions fallback).
- * Model: grok-build-0.1 (agentic coding; powers Grok Build CLI)
- * Docs: https://docs.x.ai/build/overview · https://x.ai/news/grok-build-0-1
+ * Default: grok-4.6. Override: XAI_BUILD_MODEL=grok-build-0.1
+ * Docs: https://docs.x.ai/build/overview
  */
 
-export const GROK_BUILD_MODEL =
-  process.env.XAI_BUILD_MODEL?.trim() || 'grok-build-0.1'
+import { buildModel, buildFallbackModel } from './model-defaults.js'
+import { REASONING_BUILD } from './reasoning.js'
 
-export const GROK_BUILD_FALLBACK =
-  process.env.XAI_BUILD_FALLBACK?.trim() || 'grok-4.5'
+export const GROK_BUILD_MODEL = buildModel()
+
+export const GROK_BUILD_FALLBACK = buildFallbackModel()
 
 /** Extract plain text from /v1/responses body (several shapes across SDK versions) */
 export function extractResponsesText(data) {
@@ -106,9 +107,9 @@ export async function callGrokBuild(apiKey, { system, user, maxTokens = 12000, t
         max_tokens: maxTokens,
         temperature,
       }
-      // grok-4.x may accept reasoning_effort; grok-build typically does not
-      if (String(model).includes('grok-4')) {
-        body.reasoning_effort = 'low'
+      // grok-4.x accepts reasoning_effort; grok-build specialist models do not
+      if (String(model).includes('grok-4') && !String(model).includes('build')) {
+        body.reasoning_effort = REASONING_BUILD
       }
       const res = await fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',

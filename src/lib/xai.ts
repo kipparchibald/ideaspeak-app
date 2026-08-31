@@ -28,7 +28,7 @@ export async function callXai(
         'X-AI-Key': key,
       },
       body: JSON.stringify({
-        model: options.model || 'grok-3',
+        model: options.model || 'grok-4.6',
         messages,
         temperature: options.temperature ?? 0.6,
         max_tokens: 6000,
@@ -131,7 +131,7 @@ export async function generateWithLLM(
         name: data.parsed.name || 'IdeaSpeak App',
         plan: data.parsed.plan || 'LLM generated',
         raw: data.content,
-        model: data.model || 'grok-build-0.1',
+        model: data.model || 'grok-4.6',
         engine: data.engine || 'grok-build',
         api: data.api,
       };
@@ -144,7 +144,7 @@ export async function generateWithLLM(
 }
 
 /** Default build model label for UI when status not yet loaded */
-export const GROK_BUILD_MODEL_LABEL = 'grok-build-0.1'
+export const GROK_BUILD_MODEL_LABEL = 'grok-4.6'
 
 export type DiscussResult = {
   content: string

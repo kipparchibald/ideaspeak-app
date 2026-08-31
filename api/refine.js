@@ -1,4 +1,5 @@
 import { chatCompletion, getApiKey, xaiError, parseJsonFromContent } from './xai.js'
+import { REASONING_CONVERSATION } from './reasoning.js'
 import { corsHeaders, rejectBlockedOrigin, enforceRateLimit } from './security.js'
 import {
   edgeErrorResponse,
@@ -47,7 +48,7 @@ export default async function handler(req) {
     ],
     temperature: 0.5,
     maxTokens: 3000,
-    reasoningEffort: 'low',
+    reasoningEffort: REASONING_CONVERSATION,
   })
 
   if (!ok) {

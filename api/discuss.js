@@ -1,5 +1,6 @@
 import { buildDiscussSystem, humanizeVoiceReply, voicePrimingMessages } from './prompts.js'
 import { chatCompletion, getApiKey, xaiError } from './xai.js'
+import { resolveDiscussReasoningEffort } from './reasoning.js'
 import { corsHeaders, rejectBlockedOrigin, enforceRateLimit } from './security.js'
 import {
   edgeErrorResponse,
@@ -59,7 +60,7 @@ export default async function handler(req) {
     messages: fullMessages,
     temperature: isVoice ? 0.95 : 0.85,
     maxTokens: isVoice ? 180 : 1200,
-    reasoningEffort: 'low',
+    reasoningEffort: resolveDiscussReasoningEffort(messages),
   })
 
   if (!ok) {
